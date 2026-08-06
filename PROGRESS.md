@@ -5,10 +5,9 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
 
 - [x] 0. Repo scaffold: README stub, LICENSE (MIT), .gitignore, PROGRESS.md
 - [x] 1. `gh repo create soppressata/health-inspector --public`, push initial scaffold (https://github.com/soppressata/health-inspector)
-- [ ] 2. `action.yml` — composite/JS action definition with inputs: api-key, base-url (default
-      https://api.deepseek.com), model (default deepseek-chat), probability (default 1.0),
-      paths (default whole repo), max-candidates, label (default "health-inspector"),
-      state-branch. Outputs: findings-count, report-url.
+- [x] 2. `action.yml` — node20 composite action, all 8 inputs + 2 outputs. package.json +
+      placeholder src/index.js. Verified: action.yml parses, `node src/index.js` runs and
+      exits 0. Runtime choice: Node.js (recorded for later items).
 - [ ] 3. `src/scan.*` — Stage 0 free static pre-filter over the diff since last inspection
       (git diff against last-scanned ref stored in state; full scan if no prior state):
       TODO/FIXME debt, secret-looking strings (high-entropy / known key prefixes), missing
