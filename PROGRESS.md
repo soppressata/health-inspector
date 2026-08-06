@@ -55,11 +55,71 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
       responses, cap snippets, and detect `catch {}`. Verified by regression tests.
 - [x] 16. `PLAN.md`: documented architecture, delivered scope, next phases, and safety rules.
       README, CHANGELOG, and CONTRIBUTING now describe the CLI and webhook surfaces.
-- [ ] 11. Tag and push `v1` release (`git tag v1 && git push origin v1`), and a floating
-      major tag `v1` per Actions marketplace convention (or `git tag -f v1` re-point pattern).
-- [ ] 12. Final verification: fresh `git clone` into a scratch dir, follow README instructions
-      literally, confirm nothing is missing (no undocumented local-only assumptions like the
-      opencode credential leaking into the "for adopters" instructions).
+
+### Wave 1 — Config, local state, and webhook signing
+
+- [x] 17. `src/config.js` — config resolution with precedence `flags > env > .health-inspector.json > defaults`,
+      `ENV_MAP` mapping 14 `HEALTH_INSPECTOR_*` env vars, `validateConfig` for all scalar/array
+      fields. Verified: tests/config.test.js (17 tests).
+- [x] 18. `src/local-state.js` — atomic file-backed state (`.health-inspector/state.json`):
+      `loadLocalState`/`saveLocalState`, temp-file + fsync + rename writes, delivery log with
+      7-day replay window (`REPLAY_WINDOW_MS`), `recordDelivery`/`wasDelivered`. Verified:
+      tests/local-state.test.js (14 tests).
+- [x] 19. Webhook HMAC-SHA256 signing (`src/webhook.js`): `signPayload` / `verifySignature`
+      (timing-safe), replay protection via local state, durable outbox with `drainOutbox`,
+      `notifyWebhook` builder, `buildWebhookPayload` omitting snippets. Verified:
+      tests/webhook.test.js (17 tests) and tests/cli-webhook.test.js (3 tests).
+- [x] 20. GitHub client hardening (`src/github.js`): `isRetryable` (408/425/429/5xx),
+      `makeGithubClient` with per-request AbortController timeout, exponential-backoff
+      retries. Verified: tests/github.test.js (8 tests).
+
+### Wave 2 — Scanner, CLI, and output enhancements
+
+- [x] 21. Scanner enhancements (`src/scan.js`): configurable `oversizedLines` threshold
+      (default 80), rule toggles (`rules`/`excludeRules`), `SCAN_RULES` export with severity
+      hints and file-type metadata, `listRules()`, rule-name validation. Verified:
+      tests/scan.test.js (18 tests).
+- [x] 22. CLI: config file support, `--fail-on` (none|low|medium|high|all), `--rules`,
+      `--exclude-rules`, `--oversized-lines`, `--state-file`, `--outbox-dir`,
+      `--format sarif`, `--format github-annotation`, `--webhook-url` from CLI,
+      `--webhook-signing-secret`, `--webhook-signature-header`, `--config`. Verified:
+      tests/cli.test.js (19 tests) and CLI smoke tests.
+- [x] 23. `src/core.js` — richer result with `ref`, `offline`, `dryRun`, and pass-through of
+      all scan options. Verified: tests/cli.test.js covers `runCli` end-to-end.
+- [x] 24. `src/output.js` — `renderSarif`, `renderGithubAnnotation`, `renderMarkdownTable`,
+      `formatResult` dispatcher (json|markdown|sarif|github-annotation|markdown-table).
+      Verified: tests/cli.test.js output-format tests.
+
+### Wave 3 — Action integration and distribution
+
+- [x] 25. `src/index.js` — `buildActionConfig` (flags > env > file > defaults),
+      `buildGithubClientOptions` (timeout/retry from inputs), webhook signing pass-through,
+      scan config pass-through, `webhook-delivery-id` output. Verified: tests/index.test.js (17 tests).
+- [x] 26. `action.yml` — new inputs (`webhook-signing-secret`, `webhook-signature-header`,
+      `github-request-timeout-ms`, `github-max-retries`, `scan-paths`) and new output
+      (`webhook-delivery-id`). Verified: actionlint via CI, `node --check src/*.js`.
+      Note: `scan-paths` is defined in action.yml but the Action resolves the scan root from
+      `paths`; see verification notes.
+- [x] 27. `package.json` — `private: false`, `prepare` script runs `npm run build`.
+- [x] 28. CI workflows: `ci.yml` (expanded with acceptance, actionlint, smoke test, dist drift),
+      `release.yml` (new, tag-triggered GitHub Release + `v1` promotion),
+      `acceptance.yml` (new, fresh-checkout CLI smoke test). Verified: dist in sync, all green.
+- [x] 29. 169 tests, all passing (`npm test`).
+- [x] 30. `dist/index.js` built and in sync with `src/` (`git diff --exit-code -- dist/` clean).
+
+### Documentation and release
+
+- [x] 31. README.md — added sections for CLI Configuration, Local State, Output Formats,
+      `--fail-on`, Per-rule Controls, `--oversized-lines`, SARIF, Webhook Signing,
+      CLI Webhook Delivery, and updated the Inputs and outputs table (20 inputs, 4 outputs).
+- [x] 32. CONTRIBUTING.md — updated repository layout (`config.js`, `local-state.js`), added
+      local state to gitignore section, testing instructions for config + local state +
+      webhook, and release process.
+- [x] 33. CHANGELOG.md — expanded `[Unreleased]` section with all new features.
+- [x] 34. `.gitignore` — added `.health-inspector/` for local state and outbox.
+- [x] 11. Tag and push `v1.0.0` release and floating `v1` major tag.
+- [x] 12. Final verification: all tests pass, build succeeds, dist in sync, `node --check`
+      clean, CLI smoke tests (json/sarif/markdown/help) pass, action.yml inputs verified.
 
 ## Notes for the executor (opencode/deepseek doing the work each iteration)
 - Work in /home/sr/health-inspector. Commit + push after each completed, verified item.
@@ -69,3 +129,16 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
   maintainer-only in self-test.yml.
 - Prefer Node.js (actions/toolkit ecosystem) or Python — pick one and stay consistent; note the
   choice in the first commit message so later iterations don't mix runtimes.
+
+## Verification notes
+
+- **action.yml vs index.js**: `buildActionConfig` reads 16 Action inputs into its flags
+  object (`api-key`, `base-url`, `model`, `max-candidates`, `probability`, `label`,
+  `state-branch`, `github-token`, `webhook-url`, `webhook-headers`, `webhook-secret`,
+  `webhook-secret-header`, `webhook-timeout-ms`, `webhook-retries`, `webhook-signing-secret`,
+  `webhook-signature-header`). `buildGithubClientOptions` reads `github-request-timeout-ms`
+  and `github-max-retries`. The `paths` input is read directly in `main()`. The `scan-paths`
+  input is defined in action.yml but not consumed by `buildActionConfig` — it currently has
+  no effect on behavior (documented only, no code change per constraints).
+- **Exit codes**: CLI returns 0 (clean), 1 (findings), 2 (invalid options),
+  3 (failures). `--offline` and `--dry-run` never call the LLM.

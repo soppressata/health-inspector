@@ -6,3 +6,6 @@ __pycache__/
 # Do NOT hand-edit; run `npm run build` after any src/ change, then re-commit.
 *.log
 .claude/
+
+# Local CLI state and outbox (per-developer/per-run artifacts, not committed)
+.health-inspector/

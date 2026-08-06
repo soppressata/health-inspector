@@ -7,15 +7,18 @@ there is no other supported runtime.
 
 - `src/` — shared source. `index.js` is the Action entry point; `core.js` and
   `output.js` power the CLI; `scan.js` (Stage 0), `inspect.js` (Stage 1),
-  `github.js` (report filing), `state.js` (state persistence), and `webhook.js`
-  (sanitized outbound delivery) are focused adapters/modules.
+  `github.js` (report filing + retryable REST client), `state.js` (GitHub
+  contents-API state persistence) are focused adapters. `config.js` resolves
+  flags > env > `.health-inspector.json` > defaults; `local-state.js` provides
+  atomic file-backed state for the CLI; `webhook.js` handles signed, replay-safe
+  outbound delivery.
 - `bin/health-inspector.js` — local CLI executable.
 - `tests/` — unit + integration tests, run with Node's built-in test runner.
 - `demo/` — `health-inspector-demo/` (a fixture repo the scanner is asserted
   against) and `mock-llm-server.js` (a local OpenAI-compatible stub).
 - `dist/` — **build output** from `ncc`. Do not hand-edit; run `npm run build`
   to regenerate.
-- `.github/workflows/` — CI and the end-to-end self-test.
+- `.github/workflows/` — CI, acceptance, self-test, and release workflows.
 
 ## Running tests
 
@@ -23,9 +26,32 @@ there is no other supported runtime.
 npm test
 ```
 
-`npm test` runs the Node built-in test runner across scanner, inspector, GitHub,
-state, CLI, and webhook tests. The LLM and webhook are stubbed in tests; there
-is no live network.
+`npm test` runs the Node built-in test runner (169 tests) across scanner,
+inspector, GitHub client, config, local state, CLI, and webhook modules. The
+LLM, GitHub API, and webhooks are stubbed in tests; there is no live network.
+
+### Testing the new features
+
+Each new surface has dedicated test coverage:
+
+- **Config resolution** (`tests/config.test.js`): tests
+  `DEFAULT_CONFIG`, `loadConfigFile`, `envToConfig`, `resolveConfig` precedence
+  (flags > env > file > defaults), and `validateConfig` for `maxCandidates`,
+  `probability`, `oversizedFunctionLines`, `failOn`, `rules`, and `excludeRules`.
+- **Local state** (`tests/local-state.test.js`): tests
+  `loadLocalState`/`saveLocalState` round-trips, atomic writes with no leftover
+  temp files, corrupt-file fallback, delivery replay window (7 days), and
+  `recordDelivery`/`wasDelivered`.
+- **Webhook HMAC signing** (`tests/webhook.test.js`): tests `signPayload` /
+  `verifySignature` (HMAC-SHA256, timing-safe, tampered/wrong-secret rejection,
+  header-injection prevention), replay protection, durable outbox,
+  `drainOutbox`, and `notifyWebhook` pass-through.
+- **GitHub client** (`tests/github.test.js`): tests `isRetryable`
+  classification, `makeGithubClient` timeout/retry-with-backoff behaviour, and
+  `fileReport` dedup short-circuit.
+- **Action config** (`tests/index.test.js`): tests `buildActionConfig` and
+  `buildGithubClientOptions` reading from `INPUT_*` env vars with file/env/fallback
+  precedence, and the `scan-repo` / config pass-through.
 
 To exercise the local CLI:
 
@@ -92,20 +118,38 @@ should produce a report issue (only for findings not already filed — see
 - Keep individual functions short; cap function length.
 - Prefer `node:test` + native `assert` over adding new test dependencies.
 
+## Gitignore
+
+Local runtime state is written outside version control. The following entries
+in `.gitignore` are important:
+
+```
+# Local state and outbox (written by the CLI; not committed)
+.health-inspector/
+```
+
+The `.health-inspector/` directory holds `state.json` (last-scanned ref, filed
+fingerprints, delivery log) and the optional outbox directory. These are
+per-developer and per-run artifacts and should not be committed.
+
 ## Pull requests
 
 Every PR must keep both required checks green:
 
-1. **CI** (`.github/workflows/ci.yml`): syntax checks, `npm test`, and the bundled
-   Action build/drift check.
-2. **Self-test** (`.github/workflows/self-test.yml`): the end-to-end run against
+1. **CI** (`.github/workflows/ci.yml`): `node --check` on all `src` files +
+   `npm test` + dist drift check.
+2. **Acceptance** (`.github/workflows/acceptance.yml`): CLI smoke test
+   (exit code 0 or 1, valid JSON) on a fresh checkout.
+3. **Self-test** (`.github/workflows/self-test.yml`): the end-to-end run against
    `demo/health-inspector-demo/` with the mocked LLM.
 
 When CI is green, run the linter/typecheck equivalent for this project:
 
 ```bash
 npm test          # all tests
-    node --check src/*.js bin/health-inspector.js
+node --check src/*.js bin/health-inspector.js
+npm run build    # regenerate dist/
+git diff --exit-code -- dist/  # dist must be in sync
 ```
 
 Reviewers should confirm the Action and CLI behavior has not regressed against the
@@ -121,6 +165,23 @@ the expected candidate set.
 npm run build    # ncc build src/index.js -o dist
 ```
 
-Do not edit `dist/` by hand. Tagging and `v1` promotion happen in item 11 of
-[PROGRESS.md](./PROGRESS.md) via `git tag v1 && git push origin v1`; a floating
-`v1` major tag is maintained per the Actions marketplace convention.
+Do not edit `dist/` by hand. After any `src/` change, run `npm run build` and
+re-commit the regenerated `dist/`.
+
+### Release process
+
+1. Ensure all CI checks are green on `main`.
+2. Create a version tag:
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+   Pushing a `v*` tag triggers `.github/workflows/release.yml`, which creates a
+   GitHub Release from `CHANGELOG.md`.
+3. Maintain a floating `v1` major tag per the Actions marketplace convention:
+   ```bash
+   git tag -f v1
+   git push origin --force v1
+   ```
+   The `release.yml` workflow also promotes `v1` automatically on each tagged
+   release.
