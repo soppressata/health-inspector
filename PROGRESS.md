@@ -16,11 +16,12 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
       batched POST to {base-url}/chat/completions, snippets capped 30 lines/1200 chars,
       temperature 0, max_tokens cap, JSON-fence-tolerant parsing. Verified: 14/14 tests pass
       (`npm test`), fetch is stubbed in tests (no live network).
-- [ ] 5. `src/github.*` — dedup against existing open "health-inspector"-labeled issues by
-      fingerprint before filing; create/update issue with bot-persona report. Unit tests.
-- [ ] 6. `src/state.*` — persist last-scanned git ref + filed fingerprints (e.g. a small JSON
-      blob committed to a dedicated state branch, or an issue-based ledger — pick the simpler
-      one that doesn't require extra permissions beyond `contents:write`/`issues:write`).
+- [x] 5. `src/github.js` — `fileReport` dedups via fingerprints, no-API-call short circuit
+      when nothing new, files one issue via thin `octokitLike.createIssue`. Verified in
+      tests/github.test.js.
+- [x] 6. `src/state.js` — `loadState`/`saveState` round-trip `state.json` on a dedicated
+      `state-branch` via GitHub contents API (404 → defaults), `fingerprintFinding` (sha1,
+      12 hex chars, whitespace-normalized). Verified: 26/26 total tests pass (`npm test`).
 - [ ] 7. `demo/health-inspector-demo/` — small fixture project with deliberate violations
       (a TODO, a bare except, a new function with no test, a hardcoded-looking fake secret)
       for the self-test to actually find.
