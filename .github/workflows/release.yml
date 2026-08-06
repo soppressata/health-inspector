@@ -28,7 +28,6 @@ jobs:
         # GITHUB_TOKEN pushes are not re-processed by Actions, so this does not
         # re-trigger this workflow (which only matches v* tags).
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git tag -f v1

@@ -32,7 +32,7 @@ jobs:
         run: |
           node demo/mock-llm-server.js &
           echo $! > mock-server.pid
-          for i in $(seq 1 20); do
+          for _ in $(seq 1 20); do
             if curl -sf -X POST http://localhost:8842/chat/completions -d '{}' -H 'content-type: application/json' >/dev/null; then
               echo "mock server is up"
               break
