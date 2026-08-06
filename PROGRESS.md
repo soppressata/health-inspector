@@ -4,7 +4,7 @@ Drives the autonomous build loop. Check items off `[x]` only after verifying, no
 Do not stop the loop until every item is `[x]` AND item 9's Actions run is actually green.
 
 - [x] 0. Repo scaffold: README stub, LICENSE (MIT), .gitignore, PROGRESS.md
-- [ ] 1. `gh repo create soppressata/health-inspector --public`, push initial scaffold
+- [x] 1. `gh repo create soppressata/health-inspector --public`, push initial scaffold (https://github.com/soppressata/health-inspector)
 - [ ] 2. `action.yml` — composite/JS action definition with inputs: api-key, base-url (default
       https://api.deepseek.com), model (default deepseek-chat), probability (default 1.0),
       paths (default whole repo), max-candidates, label (default "health-inspector"),
