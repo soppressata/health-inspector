@@ -29,12 +29,13 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
 - [x] 8. `.github/workflows/ci.yml` — node --check on all src files + `npm test`. Verified:
       real run https://github.com/soppressata/health-inspector/actions/runs/31071274820 green
       (13s, `gh run watch --exit-status` exit 0).
-- [ ] 9. `.github/workflows/self-test.yml` — workflow_dispatch + on-push job that runs the
+- [x] 9. `.github/workflows/self-test.yml` — workflow_dispatch + on-push job that runs the
       action for real against `demo/health-inspector-demo/`, sourcing the API key from the
       already-authenticated local opencode-go Deepseek credential path agreed with the user
       (documented inline: this job is for maintainers only, real adopters use their own key).
-      Assert a report is produced / issue filed. Push, then `gh run watch` until genuinely
-      green — do not mark this done on a red or cancelled run.
+      Assert a report is produced / issue filed. Push, then `gh watch` until genuinely
+      green — do not mark this done on a red or cancelled run. Verified: real GH Actions run
+      https://github.com/soppressata/health-inspector/actions/runs/31071618670 green (24s).
 - [ ] 10. README.md: badges, pitch (esp. the low-token-usage design), quickstart (12-line
       workflow snippet), how the two-stage pipeline keeps cost near zero on clean repos.
       CONTRIBUTING.md, CHANGELOG.md (Keep a Changelog format), MIT LICENSE finalized.
