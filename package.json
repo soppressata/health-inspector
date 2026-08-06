@@ -1,0 +1,13 @@
+{
+  "name": "health-inspector-action",
+  "version": "0.1.0",
+  "description": "A GitHub Action that audits your repo and files a report only when it finds real violations.",
+  "type": "module",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "build": "ncc build src/index.js -o dist",
+    "test": "node --test tests/"
+  },
+  "license": "MIT"
+}

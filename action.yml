@@ -1,0 +1,46 @@
+name: 'Health Inspector'
+description: 'Shows up unannounced, does a deep audit of your repo, and files a report only when it finds real violations.'
+author: soppressata
+
+inputs:
+  api-key:
+    description: 'LLM API key (e.g. DeepSeek).'
+    required: true
+  base-url:
+    description: 'Base URL of the OpenAI-compatible chat completions API.'
+    required: false
+    default: 'https://api.deepseek.com'
+  model:
+    description: 'Model to use for the inspection report.'
+    required: false
+    default: 'deepseek-chat'
+  probability:
+    description: 'Chance (0-1) that this run actually executes, so scheduled runs feel unannounced.'
+    required: false
+    default: '1.0'
+  paths:
+    description: 'Glob or directory to scan.'
+    required: false
+    default: '.'
+  max-candidates:
+    description: 'Maximum number of scan candidates to pass to the model.'
+    required: false
+    default: '15'
+  label:
+    description: 'Label used for filed issue reports.'
+    required: false
+    default: 'health-inspector'
+  state-branch:
+    description: 'Branch used to persist state (last-scanned ref, filed fingerprints).'
+    required: false
+    default: 'health-inspector-state'
+
+outputs:
+  findings-count:
+    description: 'Number of confirmed findings reported.'
+  report-url:
+    description: 'URL of the filed issue report, if any.'
+
+runs:
+  using: node20
+  main: dist/index.js
