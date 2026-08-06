@@ -8,12 +8,10 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
 - [x] 2. `action.yml` — node20 composite action, all 8 inputs + 2 outputs. package.json +
       placeholder src/index.js. Verified: action.yml parses, `node src/index.js` runs and
       exits 0. Runtime choice: Node.js (recorded for later items).
-- [ ] 3. `src/scan.*` — Stage 0 free static pre-filter over the diff since last inspection
-      (git diff against last-scanned ref stored in state; full scan if no prior state):
-      TODO/FIXME debt, secret-looking strings (high-entropy / known key prefixes), missing
-      tests for new/changed source files, oversized functions, bare except / swallowed
-      errors, missing error handling on new I/O, stale docs vs changed public API.
-      Ranked, capped candidate list. Unit tests in tests/.
+- [x] 3. `src/scan.js` — Stage 0 static scanner: todo_fixme, secret_like, bare_except (JS+Py),
+      untested_new_function, oversized_function. Ranked + capped. git-diff-based when
+      sinceRef given, falls back to full scan. Verified: 8/8 unit tests pass (`npm test`),
+      real git fixtures via mkdtempSync.
 - [ ] 4. `src/inspect.*` — Stage 1: skip entirely if scan.* found nothing (0 tokens). Else one
       batched HTTP POST to {base-url}/chat/completions (OpenAI-compatible schema) with only
       the top-N capped/truncated candidate snippets, asking for confirm/reject + severity +
