@@ -111,12 +111,17 @@ function walk(dir, out = []) {
 
 function allTracked(rootDir) {
   try {
-    const out = (0,external_node_child_process_namespaceObject.execFileSync)('git', ['ls-files'], {
+    const tracked = (0,external_node_child_process_namespaceObject.execFileSync)('git', ['ls-files'], {
       cwd: rootDir,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const files = out.split('\n').map((s) => s.trim()).filter(Boolean);
+    const untracked = (0,external_node_child_process_namespaceObject.execFileSync)('git', ['ls-files', '--others', '--exclude-standard'], {
+      cwd: rootDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const files = [...tracked.split('\n'), ...untracked.split('\n')].map((s) => s.trim()).filter(Boolean);
     if (files.length > 0) return files;
   } catch {
     // fall through to a plain walk of the tree
@@ -177,7 +182,7 @@ function isCommentOnlyJs(body) {
 function checkBareExceptJs(file, lines) {
   const out = [];
   const text = lines.join('\n');
-  const re = /catch\s*\([^)]*\)\s*\{/g;
+  const re = /catch\s*(?:\([^)]*\)\s*)?\{/g;
   for (const m of text.matchAll(re)) {
     const open = text.indexOf('{', m.index);
     const close = matchBrace(text, open);
@@ -293,6 +298,9 @@ function checkUntestedNewFunction(rootDir, file, content) {
 }
 
 async function scanRepo({ rootDir, sinceRef, maxCandidates } = {}) {
+  if (maxCandidates !== undefined && (!Number.isInteger(maxCandidates) || maxCandidates <= 0)) {
+    throw new TypeError('scanRepo: maxCandidates must be a positive integer');
+  }
   const dir = external_node_path_namespaceObject.resolve(rootDir || process.cwd());
 
   let files = sinceRef ? changedFilesSince(dir, sinceRef) : null;
@@ -318,7 +326,7 @@ async function scanRepo({ rootDir, sinceRef, maxCandidates } = {}) {
   }
 
   candidates.sort((a, b) => b.severity_hint - a.severity_hint);
-  const cap = Number.isFinite(maxCandidates) && maxCandidates > 0 ? maxCandidates : Infinity;
+  const cap = maxCandidates === undefined ? Infinity : maxCandidates;
   return candidates.slice(0, cap);
 }
 
@@ -344,13 +352,15 @@ Reply with STRICT JSON only, using exactly this shape:
 function truncateSnippet(snippet, maxLines = 30, maxChars = 1200) {
   const text = String(snippet ?? '');
   const lines = text.split('\n');
-  if (lines.length > maxLines) {
-    return `${lines.slice(0, maxLines).join('\n')}\n... (truncated)`;
-  }
-  if (text.length > maxChars) {
-    return `${text.slice(0, maxChars)}... (truncated)`;
-  }
-  return text;
+  const marker = '... (truncated)';
+  const lineLimit = Math.max(1, maxLines);
+  const lineTruncated = lines.length > lineLimit;
+  let result = lineTruncated ? lines.slice(0, lineLimit).join('\n') : text;
+  const truncated = lineTruncated || result.length > maxChars;
+  if (!truncated) return result;
+  if (maxChars <= marker.length) return marker.slice(0, Math.max(0, maxChars));
+  result = result.slice(0, maxChars - marker.length);
+  return `${result}${marker}`;
 }
 
 function buildUserContent(candidates) {
@@ -359,6 +369,17 @@ function buildUserContent(candidates) {
     return `${i + 1}. [${c.type}] ${c.file}:${c.line}\n\`\`\`\n${snippet}\n\`\`\``;
   });
   return `Audit these ${candidates.length} candidates:\n\n${entries.join('\n\n')}`;
+}
+
+function redactCandidate(candidate) {
+  if (candidate.type !== 'secret_like') return candidate;
+  return {
+    ...candidate,
+    snippet: String(candidate.snippet ?? '')
+      .replace(/(AKIA)[0-9A-Z]{16}/g, '$1[REDACTED]')
+      .replace(/(-----BEGIN )[A-Z0-9 ]+(PRIVATE KEY-----)/g, '$1[REDACTED]$2')
+      .replace(/((?:api[_-]?key|apikey|secret|password)\s*[:=]\s*["'])[^"']+/gi, '$1[REDACTED]'),
+  };
 }
 
 function parseJsonContent(content) {
@@ -404,8 +425,8 @@ function buildReport(findings, summaryMarkdown) {
   return out.join('\n').trim();
 }
 
-async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutputTokens } = {}) {
-  const list = Array.isArray(candidates) ? candidates : [];
+async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutputTokens, timeoutMs = 30000 } = {}) {
+  const list = Array.isArray(candidates) ? candidates.map(redactCandidate) : [];
   if (list.length === 0) {
     return { findings: [], reportMarkdown: null, tokensUsed: 0 };
   }
@@ -428,6 +449,8 @@ async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutput
   };
 
   let response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
   try {
     response = await fetch(url, {
       method: 'POST',
@@ -436,6 +459,7 @@ async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutput
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
   } catch (err) {
     throw new Error(`inspectCandidates: network error calling ${url}: ${err.message}`);
@@ -446,6 +470,8 @@ async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutput
     rawText = await response.text();
   } catch (err) {
     throw new Error(`inspectCandidates: failed to read LLM API response: ${err.message}`);
+  } finally {
+    clearTimeout(timeout);
   }
 
   let data;
@@ -464,12 +490,23 @@ async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutput
     throw new Error('inspectCandidates: LLM API response had no choices');
   }
 
-  const content = data.choices[0].message && data.choices[0].message.content;
+  const choice = data.choices[0];
+  if (!choice || typeof choice !== 'object' || !choice.message || typeof choice.message !== 'object') {
+    throw new Error('inspectCandidates: LLM API response had a malformed choice');
+  }
+  const content = choice.message.content;
   const parsed = parseJsonContent(content);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('inspectCandidates: model response JSON must be an object');
+  }
+  if (!Array.isArray(parsed.findings)) {
+    throw new Error('inspectCandidates: model response findings must be an array');
+  }
 
-  const modelFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
+  const modelFindings = parsed.findings;
   const findings = [];
   for (const f of modelFindings) {
+    if (!f || typeof f !== 'object' || Array.isArray(f)) continue;
     if (f.confirmed !== true) continue;
     const index = Number(f.index);
     const candidate = list[index - 1];
@@ -500,16 +537,17 @@ const STATE_FILE = 'state.json';
 const DEFAULT_STATE = { lastScannedRef: null, filedFingerprints: [] };
 
 /**
- * @param {{file?: string, type?: string, snippet?: string}} finding
+ * @param {{file?: string, type?: string, line?: number, snippet?: string}} finding
  * @returns {string} stable 12-hex fingerprint
  */
 function fingerprintFinding(finding) {
   const file = String((finding && finding.file) || '');
   const type = String((finding && finding.type) || '');
+  const line = String((finding && finding.line) || '');
   const snippet = String((finding && finding.snippet) || '');
   const normalized = snippet.replace(/\s+/g, ' ').trim();
   const digest = (0,external_node_crypto_namespaceObject.createHash)('sha1')
-    .update(`${file}\u0000${type}\u0000${normalized}`)
+    .update(`${file}\u0000${type}\u0000${line}\u0000${normalized}`)
     .digest('hex');
   return digest.slice(0, 12);
 }
@@ -679,7 +717,7 @@ async function fileReport({ octokitLike, owner, repo, label, reportMarkdown, fin
   const newFindings = list.filter((f) => !alreadyFiled.has(fingerprintFinding(f)));
 
   if (newFindings.length === 0) {
-    return { filed: false, reason: 'all findings already reported' };
+    return { filed: false, reason: 'all findings already reported', newFindings, updatedState: state };
   }
 
   const issue = await octokitLike.createIssue({
@@ -695,10 +733,71 @@ async function fileReport({ octokitLike, owner, repo, label, reportMarkdown, fin
     if (!state.filedFingerprints.includes(fp)) state.filedFingerprints.push(fp);
   }
 
-  return { filed: true, issueUrl: issue.html_url, updatedState: state };
+  return { filed: true, issueUrl: issue.html_url, newFindings, updatedState: state };
+}
+
+;// CONCATENATED MODULE: ./src/webhook.js
+
+
+const TRANSIENT = new Set([408, 425, 429]);
+
+function validateHeaders(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('webhook headers must be an object');
+  const headers = {};
+  for (const [name, value] of Object.entries(input)) {
+    if (!name || /[\r\n]/.test(name) || /^(host|content-length|content-type)$/i.test(name) || typeof value !== 'string' || /[\r\n]/.test(value)) {
+      throw new TypeError(`invalid webhook header: ${name}`);
+    }
+    headers[name] = value;
+  }
+  return headers;
+}
+
+function redactSensitive(value) {
+  return String(value ?? '').replace(/(Bearer\s+)[A-Za-z0-9._~+\/-]+/gi, '$1[REDACTED]').replace(/(["']?(?:api[_-]?key|secret|password)["']?\s*[:=]\s*["'])[^"']+/gi, '$1[REDACTED]');
+}
+
+function makeDeliveryId({ repository = '', ref = '', findings = [] } = {}) {
+  return (0,external_node_crypto_namespaceObject.createHash)('sha256').update(`${repository}\0${ref}\0${findings.map((f) => `${f.file}:${f.line}:${f.type}`).join('\0')}`).digest('hex').slice(0, 32);
+}
+
+function buildWebhookPayload({ repository, ref, findings = [], reportUrl = null, deliveryId } = {}) {
+  return {
+    schema_version: 1, event: 'health-inspector.findings', delivery_id: deliveryId || makeDeliveryId({ repository, ref, findings }),
+    repository: repository || null, ref: ref || null, findings_count: findings.length,
+    findings: findings.map(({ type, file, line, severity, reason }) => ({ type, file, line, severity, reason })), report_url: reportUrl,
+  };
+}
+
+async function sendWebhook(url, payload, { headers = {}, secret, secretHeader = 'X-Health-Inspector-Secret', timeoutMs = 5000, retries = 3, fetchImpl = fetch } = {}) {
+  const custom = validateHeaders(headers);
+  if (secret !== undefined) { if (!secretHeader || /[\r\n]/.test(secretHeader)) throw new TypeError('invalid webhook secret header'); custom[secretHeader] = String(secret); }
+  const delivery = payload.delivery_id || makeDeliveryId(payload);
+  const attempts = Math.max(1, Number(retries) + 1);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+    try {
+      const response = await fetchImpl(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...custom, 'X-Health-Inspector-Delivery': delivery }, body: JSON.stringify(payload), signal: controller.signal });
+      if (response.ok) return { delivered: true, attempts: attempt + 1, deliveryId: delivery };
+      const retryable = TRANSIENT.has(response.status) || response.status >= 500;
+      if (!retryable || attempt + 1 === attempts) return { delivered: false, attempts: attempt + 1, status: response.status, error: `HTTP ${response.status}` };
+    } catch (error) {
+      if (attempt + 1 === attempts) return { delivered: false, attempts: attempt + 1, error: redactSensitive(error.message) };
+    } finally { clearTimeout(timer); }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(1000, 100 * 2 ** attempt)));
+  }
+  return { delivered: false, attempts };
+}
+
+async function notifyWebhook(options) {
+  if (!options || !options.url || !options.findings || options.findings.length === 0) return { delivered: false, skipped: true };
+  const payload = buildWebhookPayload(options);
+  return sendWebhook(options.url, payload, options);
 }
 
 ;// CONCATENATED MODULE: ./src/index.js
+
 
 
 
@@ -748,6 +847,14 @@ function writeOutput(name, value) {
   }
 }
 
+function parseWebhookHeaders(value) {
+  if (!value) return {};
+  let parsed;
+  try { parsed = JSON.parse(value); } catch { throw new Error('Invalid webhook-headers: expected a JSON object'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid webhook-headers: expected a JSON object');
+  return parsed;
+}
+
 async function main() {
   const apiKey = getInput('api-key');
   const baseUrl = getInput('base-url') || 'https://api.deepseek.com';
@@ -757,6 +864,7 @@ async function main() {
   const label = getInput('label') || 'health-inspector';
   const stateBranch = getInput('state-branch') || 'health-inspector-state';
   const githubToken = getInput('github-token');
+  const webhookUrl = getInput('webhook-url');
   const rootDir = external_node_path_namespaceObject.resolve(getInput('paths') || '.');
   const { owner, repo } = parseOwnerRepo(process.env.GITHUB_REPOSITORY);
 
@@ -809,6 +917,23 @@ async function main() {
     stateBranch,
     state: result.updatedState,
   });
+
+  if (webhookUrl && result.newFindings && result.newFindings.length > 0) {
+    const webhook = await notifyWebhook({
+      url: webhookUrl,
+      repository: `${owner}/${repo}`,
+      ref: currentRef,
+      findings: result.newFindings,
+      reportUrl: result.issueUrl || null,
+      headers: parseWebhookHeaders(getInput('webhook-headers')),
+      secret: getInput('webhook-secret'),
+      secretHeader: getInput('webhook-secret-header') || 'X-Health-Inspector-Secret',
+      timeoutMs: Number.parseInt(getInput('webhook-timeout-ms') || '5000', 10),
+      retries: Number.parseInt(getInput('webhook-retries') || '3', 10),
+    });
+    writeOutput('webhook-delivered', String(Boolean(webhook.delivered)));
+    if (!webhook.delivered) log(`Webhook delivery failed after ${webhook.attempts || 1} attempt(s); continuing.`);
+  }
 
   writeOutput('findings-count', String(findings.length));
   if (result.filed && result.issueUrl) writeOutput('report-url', result.issueUrl);

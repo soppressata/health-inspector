@@ -77,7 +77,7 @@ export async function fileReport({ octokitLike, owner, repo, label, reportMarkdo
   const newFindings = list.filter((f) => !alreadyFiled.has(fingerprintFinding(f)));
 
   if (newFindings.length === 0) {
-    return { filed: false, reason: 'all findings already reported' };
+    return { filed: false, reason: 'all findings already reported', newFindings, updatedState: state };
   }
 
   const issue = await octokitLike.createIssue({
@@ -93,5 +93,5 @@ export async function fileReport({ octokitLike, owner, repo, label, reportMarkdo
     if (!state.filedFingerprints.includes(fp)) state.filedFingerprints.push(fp);
   }
 
-  return { filed: true, issueUrl: issue.html_url, updatedState: state };
+  return { filed: true, issueUrl: issue.html_url, newFindings, updatedState: state };
 }

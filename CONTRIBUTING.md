@@ -5,9 +5,11 @@ there is no other supported runtime.
 
 ## Repository layout
 
-- `src/` — action source. `index.js` is the entry point; `scan.js` (Stage 0),
-  `inspect.js` (Stage 1), `github.js` (report filing), `state.js` (state
-  persistence).
+- `src/` — shared source. `index.js` is the Action entry point; `core.js` and
+  `output.js` power the CLI; `scan.js` (Stage 0), `inspect.js` (Stage 1),
+  `github.js` (report filing), `state.js` (state persistence), and `webhook.js`
+  (sanitized outbound delivery) are focused adapters/modules.
+- `bin/health-inspector.js` — local CLI executable.
 - `tests/` — unit + integration tests, run with Node's built-in test runner.
 - `demo/` — `health-inspector-demo/` (a fixture repo the scanner is asserted
   against) and `mock-llm-server.js` (a local OpenAI-compatible stub).
@@ -21,9 +23,19 @@ there is no other supported runtime.
 npm test
 ```
 
-`npm test` runs `node --test tests/`, which exercises `src/scan.js` (8 tests),
-`src/inspect.js` (14 tests), `src/github.js`, and `src/state.js`. The LLM is
-stubbed in tests — there is no live network.
+`npm test` runs the Node built-in test runner across scanner, inspector, GitHub,
+state, CLI, and webhook tests. The LLM and webhook are stubbed in tests; there
+is no live network.
+
+To exercise the local CLI:
+
+```bash
+npm install
+npx health-inspector . --offline --format json
+```
+
+Use `--dry-run` or `--offline` when testing scanner behavior without an API key.
+The CLI returns `1` for confirmed findings, so CI can gate on that status.
 
 ## Local self-test (mocked LLM)
 
@@ -84,8 +96,8 @@ should produce a report issue (only for findings not already filed — see
 
 Every PR must keep both required checks green:
 
-1. **CI** (`.github/workflows/ci.yml`): `node --check` on all `src` files plus
-   `npm test`.
+1. **CI** (`.github/workflows/ci.yml`): syntax checks, `npm test`, and the bundled
+   Action build/drift check.
 2. **Self-test** (`.github/workflows/self-test.yml`): the end-to-end run against
    `demo/health-inspector-demo/` with the mocked LLM.
 
@@ -93,10 +105,10 @@ When CI is green, run the linter/typecheck equivalent for this project:
 
 ```bash
 npm test          # all tests
-node --check src/*.js   # syntax check, mirrors CI
+    node --check src/*.js bin/health-inspector.js
 ```
 
-Reviewers should confirm the action's behavior has not regressed against the
+Reviewers should confirm the Action and CLI behavior has not regressed against the
 fixture repo (`demo/health-inspector-demo/`) — a clean repo should produce zero
 candidates and zero tokens spent; a fixture dirty repo should produce exactly
 the expected candidate set.

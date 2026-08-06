@@ -1,4 +1,4 @@
-# 🕵️ Health Inspector
+# Health Inspector
 
 A GitHub Action that shows up unannounced, does a deep audit of your repo, and
 files a report only when it finds real violations — like a real health
@@ -35,6 +35,9 @@ on:
 jobs:
   inspect:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # state branch
+      issues: write   # finding reports
     steps:
       - uses: actions/checkout@v4
       - uses: soppressata/health-inspector@v1
@@ -50,6 +53,19 @@ jobs:
 ```
 
 `api-key` is the only required input. The rest have sensible defaults.
+
+For repositories that do not use GitHub Actions, install the package and run a
+local scan:
+
+```sh
+npx health-inspector . --offline --format markdown
+HEALTH_INSPECTOR_API_KEY=... npx health-inspector . --format json
+```
+
+The CLI exits `0` for a clean scan, `1` when findings are confirmed, `2` for
+invalid options, and `3` for scan/provider failures. `--dry-run` and
+`--offline` never call the LLM. JSON output intentionally omits source snippets
+by default; use `--include-snippets` only in a trusted local environment.
 
 ## How it works
 
@@ -103,6 +119,12 @@ this run) and `report-url` (URL of the filed issue, if any).
 | `label` | Label used for filed issue reports. | no | `health-inspector` |
 | `state-branch` | Branch used to persist state (last-scanned ref, filed fingerprints). | no | `health-inspector-state` |
 | `github-token` | GitHub token used to authenticate REST API calls. | no | `${{ github.token }}` |
+| `webhook-url` | Optional endpoint notified for newly confirmed findings. | no | |
+| `webhook-headers` | Optional JSON object of additional webhook headers. | no | |
+| `webhook-secret` | Optional secret sent in the configured secret header. | no | |
+| `webhook-secret-header` | Header name for `webhook-secret`. | no | `X-Health-Inspector-Secret` |
+| `webhook-timeout-ms` | Webhook request timeout. | no | `5000` |
+| `webhook-retries` | Retries for transient webhook failures. | no | `3` |
 
 ### Outputs
 
@@ -110,6 +132,27 @@ this run) and `report-url` (URL of the filed issue, if any).
 | --- | --- |
 | `findings-count` | Number of confirmed findings reported. |
 | `report-url` | URL of the filed issue report, if any. |
+| `webhook-delivered` | `true` when an optional findings webhook was delivered. |
+
+### Webhooks
+
+Set `webhook-url` to receive a `POST` only when newly confirmed findings are
+reported. The JSON payload has `schema_version`, `event`, `delivery_id`,
+repository/ref metadata, sanitized finding locations/reasons, and the issue URL.
+It never includes source snippets or the full Markdown report. Delivery uses a
+bounded timeout and retries transient failures; a failed notification is logged
+as a warning after the issue and state have already been persisted. Optional
+`webhook-headers` must be a JSON object, and `webhook-secret` is sent through
+`webhook-secret-header` rather than placed in the URL.
+
+## Expansion Plan
+
+The shared pipeline is intentionally split into scanner, inspector, and output
+adapters. The current release provides the Action, a local CLI, and outbound
+webhooks. The next safe expansion is to add local state and config-file
+precedence to the CLI, then a durable webhook outbox and HMAC signatures for
+deployments that require guaranteed delivery. GitHub issue/state access remains
+an Action adapter so local scans do not require GitHub credentials.
 
 ## Development
 

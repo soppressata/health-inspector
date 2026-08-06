@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Added
+- Local CLI (`bin/health-inspector.js`) with JSON/Markdown output, offline and dry-run
+  modes, safe defaults that omit snippets, validation, and CI-friendly exit codes.
+- Shared inspection core and output renderers (`src/core.js`, `src/output.js`) so local
+  scans do not require GitHub credentials or Actions environment variables.
+- Outbound webhook delivery (`src/webhook.js`) with sanitized finding payloads, stable
+  delivery IDs, header validation, secret headers, bounded timeout, and transient retries.
+- Action webhook inputs (`webhook-url`, headers, secret, timeout, retries) and the
+  `webhook-delivered` output. Notifications happen after issue/state persistence.
+- `PLAN.md` documenting the architecture, delivered scope, next phases, and safety rules.
 - Stage 0 static scanner (`src/scan.js`): `todo_fixme`, `secret_like`, `bare_except`,
   `untested_new_function`, `oversized_function`. Deterministic, no LLM calls. Supports
   git-diff-based scanning since the last inspected ref (`sinceRef`), falling back to a
@@ -17,8 +26,7 @@
   a dedicated `state-branch` (default `health-inspector-state`) via GitHub contents API
   (404 → defaults); `fingerprintFinding` uses sha1, 12 hex chars, whitespace-normalized.
 - GitHub Actions composite action (`action.yml`) — Node.js 20, entrypoint `dist/index.js`,
-  10 inputs (`api-key`, `base-url`, `model`, `probability`, `paths`, `max-candidates`,
-  `label`, `state-branch`, `github-token`) and 2 outputs (`findings-count`, `report-url`).
+  15 inputs, including webhook delivery configuration, and 3 outputs.
 - `demo/health-inspector-demo/` fixture (`payments.js`): a realistic demo repo with a
   TODO, a detuned fake secret, and a swallowed `catch (e) {}`.
 - `demo/mock-llm-server.js`: local OpenAI-compatible stub used by the self-test workflow.
@@ -34,4 +42,10 @@
 ### Deprecated
 ### Removed
 ### Fixed
+- Preserve state when a run has no newly reportable findings, preventing repeated scans
+  and duplicate work.
+- Include standard untracked files in full scans, distinguish repeated findings by line,
+  validate malformed model responses, enforce both snippet limits, and detect `catch {}`.
 ### Security
+- Redact secret-looking values before model inspection and exclude snippets from webhook
+  payloads by default. Webhook failures are best-effort after durable Action state writes.

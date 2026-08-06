@@ -19,13 +19,15 @@ Reply with STRICT JSON only, using exactly this shape:
 function truncateSnippet(snippet, maxLines = 30, maxChars = 1200) {
   const text = String(snippet ?? '');
   const lines = text.split('\n');
-  if (lines.length > maxLines) {
-    return `${lines.slice(0, maxLines).join('\n')}\n... (truncated)`;
-  }
-  if (text.length > maxChars) {
-    return `${text.slice(0, maxChars)}... (truncated)`;
-  }
-  return text;
+  const marker = '... (truncated)';
+  const lineLimit = Math.max(1, maxLines);
+  const lineTruncated = lines.length > lineLimit;
+  let result = lineTruncated ? lines.slice(0, lineLimit).join('\n') : text;
+  const truncated = lineTruncated || result.length > maxChars;
+  if (!truncated) return result;
+  if (maxChars <= marker.length) return marker.slice(0, Math.max(0, maxChars));
+  result = result.slice(0, maxChars - marker.length);
+  return `${result}${marker}`;
 }
 
 function buildUserContent(candidates) {
@@ -34,6 +36,17 @@ function buildUserContent(candidates) {
     return `${i + 1}. [${c.type}] ${c.file}:${c.line}\n\`\`\`\n${snippet}\n\`\`\``;
   });
   return `Audit these ${candidates.length} candidates:\n\n${entries.join('\n\n')}`;
+}
+
+function redactCandidate(candidate) {
+  if (candidate.type !== 'secret_like') return candidate;
+  return {
+    ...candidate,
+    snippet: String(candidate.snippet ?? '')
+      .replace(/(AKIA)[0-9A-Z]{16}/g, '$1[REDACTED]')
+      .replace(/(-----BEGIN )[A-Z0-9 ]+(PRIVATE KEY-----)/g, '$1[REDACTED]$2')
+      .replace(/((?:api[_-]?key|apikey|secret|password)\s*[:=]\s*["'])[^"']+/gi, '$1[REDACTED]'),
+  };
 }
 
 function parseJsonContent(content) {
@@ -79,8 +92,8 @@ function buildReport(findings, summaryMarkdown) {
   return out.join('\n').trim();
 }
 
-export async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutputTokens } = {}) {
-  const list = Array.isArray(candidates) ? candidates : [];
+export async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutputTokens, timeoutMs = 30000 } = {}) {
+  const list = Array.isArray(candidates) ? candidates.map(redactCandidate) : [];
   if (list.length === 0) {
     return { findings: [], reportMarkdown: null, tokensUsed: 0 };
   }
@@ -103,6 +116,8 @@ export async function inspectCandidates({ candidates, apiKey, baseUrl, model, ma
   };
 
   let response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
   try {
     response = await fetch(url, {
       method: 'POST',
@@ -111,6 +126,7 @@ export async function inspectCandidates({ candidates, apiKey, baseUrl, model, ma
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
   } catch (err) {
     throw new Error(`inspectCandidates: network error calling ${url}: ${err.message}`);
@@ -121,6 +137,8 @@ export async function inspectCandidates({ candidates, apiKey, baseUrl, model, ma
     rawText = await response.text();
   } catch (err) {
     throw new Error(`inspectCandidates: failed to read LLM API response: ${err.message}`);
+  } finally {
+    clearTimeout(timeout);
   }
 
   let data;
@@ -139,12 +157,23 @@ export async function inspectCandidates({ candidates, apiKey, baseUrl, model, ma
     throw new Error('inspectCandidates: LLM API response had no choices');
   }
 
-  const content = data.choices[0].message && data.choices[0].message.content;
+  const choice = data.choices[0];
+  if (!choice || typeof choice !== 'object' || !choice.message || typeof choice.message !== 'object') {
+    throw new Error('inspectCandidates: LLM API response had a malformed choice');
+  }
+  const content = choice.message.content;
   const parsed = parseJsonContent(content);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('inspectCandidates: model response JSON must be an object');
+  }
+  if (!Array.isArray(parsed.findings)) {
+    throw new Error('inspectCandidates: model response findings must be an array');
+  }
 
-  const modelFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
+  const modelFindings = parsed.findings;
   const findings = [];
   for (const f of modelFindings) {
+    if (!f || typeof f !== 'object' || Array.isArray(f)) continue;
     if (f.confirmed !== true) continue;
     const index = Number(f.index);
     const candidate = list[index - 1];

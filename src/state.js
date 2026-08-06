@@ -5,16 +5,17 @@ const STATE_FILE = 'state.json';
 export const DEFAULT_STATE = { lastScannedRef: null, filedFingerprints: [] };
 
 /**
- * @param {{file?: string, type?: string, snippet?: string}} finding
+ * @param {{file?: string, type?: string, line?: number, snippet?: string}} finding
  * @returns {string} stable 12-hex fingerprint
  */
 export function fingerprintFinding(finding) {
   const file = String((finding && finding.file) || '');
   const type = String((finding && finding.type) || '');
+  const line = String((finding && finding.line) || '');
   const snippet = String((finding && finding.snippet) || '');
   const normalized = snippet.replace(/\s+/g, ' ').trim();
   const digest = createHash('sha1')
-    .update(`${file}\u0000${type}\u0000${normalized}`)
+    .update(`${file}\u0000${type}\u0000${line}\u0000${normalized}`)
     .digest('hex');
   return digest.slice(0, 12);
 }

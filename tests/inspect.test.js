@@ -169,3 +169,43 @@ test('tokensUsed is null when usage.total_tokens is absent', async () => {
   assert.equal(result.tokensUsed, null);
   assert.equal(result.findings.length, 0);
 });
+
+test('rejects malformed findings entries without an incidental TypeError', async () => {
+  mockFetch(() => modelResponse({ content: JSON.stringify({ findings: [null], summary_markdown: '' }) }));
+  const result = await inspectCandidates({
+    candidates: [{ type: 'todo_fixme', file: 'f.js', line: 1, snippet: 'x' }],
+    apiKey: 'k', baseUrl: 'https://x', model: 'm', maxOutputTokens: 100,
+  });
+  assert.deepEqual(result.findings, []);
+});
+
+test('rejects a model response with malformed findings', async () => {
+  mockFetch(() => modelResponse({ content: JSON.stringify({ summary_markdown: '' }) }));
+  await assert.rejects(
+    () => inspectCandidates({ candidates: [{ type: 'todo_fixme', file: 'f.js', line: 1, snippet: 'x' }], apiKey: 'k', baseUrl: 'https://x', model: 'm' }),
+    /findings must be an array/,
+  );
+});
+
+test('rejects a malformed choice without an incidental TypeError', async () => {
+  mockFetch(() => jsonResponse(200, { choices: [null] }));
+  await assert.rejects(
+    () => inspectCandidates({ candidates: [{ type: 'todo_fixme', file: 'f.js', line: 1, snippet: 'x' }], apiKey: 'k', baseUrl: 'https://x', model: 'm' }),
+    /malformed choice/,
+  );
+});
+
+test('caps snippets by both lines and characters', async () => {
+  let sent;
+  mockFetch((url, options) => {
+    sent = JSON.parse(options.body);
+    return modelResponse({ content: JSON.stringify({ findings: [], summary_markdown: '' }) });
+  });
+  await inspectCandidates({
+    candidates: [{ type: 'todo_fixme', file: 'f.js', line: 1, snippet: Array(40).fill('x'.repeat(100)).join('\n') }],
+    apiKey: 'k', baseUrl: 'https://x', model: 'm',
+  });
+  const snippet = sent.messages[1].content.match(/```\n([\s\S]*)\n```/)[1];
+  assert.ok(snippet.length <= 1200);
+  assert.ok(snippet.split('\n').length <= 30);
+});

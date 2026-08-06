@@ -167,6 +167,11 @@ test('fingerprintFinding differs across file, type, and snippet', () => {
   assert.notEqual(diffSnippet, fp);
 });
 
+test('fingerprintFinding differs across line', () => {
+  const base = { file: 'src/a.js', type: 'todo_fixme', line: 3, snippet: '// TODO: hi' };
+  assert.notEqual(fingerprintFinding({ ...base, line: 4 }), fingerprintFinding(base));
+});
+
 test('fingerprintFinding normalizes snippet whitespace', () => {
   const a = fingerprintFinding({ file: 'f', type: 't', snippet: '  const  x = 1;' });
   const b = fingerprintFinding({ file: 'f', type: 't', snippet: 'const x = 1;\n' });

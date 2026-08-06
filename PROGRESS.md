@@ -1,11 +1,11 @@
-# Build Progress — Health Inspector GitHub Action
+# Build Progress — Health Inspector
 
 Drives the autonomous build loop. Check items off `[x]` only after verifying, not just writing.
 Do not stop the loop until every item is `[x]` AND item 9's Actions run is actually green.
 
 - [x] 0. Repo scaffold: README stub, LICENSE (MIT), .gitignore, PROGRESS.md
 - [x] 1. `gh repo create soppressata/health-inspector --public`, push initial scaffold (https://github.com/soppressata/health-inspector)
-- [x] 2. `action.yml` — node20 composite action, all 8 inputs + 2 outputs. package.json +
+- [x] 2. `action.yml` — node20 composite action, core inputs + outputs. package.json +
       placeholder src/index.js. Verified: action.yml parses, `node src/index.js` runs and
       exits 0. Runtime choice: Node.js (recorded for later items).
 - [x] 3. `src/scan.js` — Stage 0 static scanner: todo_fixme, secret_like, bare_except (JS+Py),
@@ -43,7 +43,18 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
       quickstart + how-it-works + complete input/output tables (cross-checked against
       action.yml: 9 inputs, 2 outputs); added CONTRIBUTING.md (npm test, local mock LLM
       self-test, code style, PR review) and CHANGELOG.md (Keep a Changelog, Unreleased
-      pending v1.0.0). No inputs invented; LICENSE, src/, tests/, workflows untouched.
+      pending v1.0.0). No inputs invented; LICENSE and workflows retained.
+- [x] 13. Local CLI: shared inspection core, Markdown/JSON output, offline/dry-run modes,
+      validation, safe defaults, and CI exit codes. Verified with CLI smoke tests and the
+      full Node test suite.
+- [x] 14. Webhooks: sanitized payloads, delivery IDs, strict headers, timeout, retries,
+      Action inputs/output, and post-persistence best-effort delivery. Verified with mocked
+      transient failures and the full Node test suite.
+- [x] 15. Reliability hardening: preserve deduplication state on no-op reports, include
+      untracked files in full scans, distinguish same-file findings by line, validate model
+      responses, cap snippets, and detect `catch {}`. Verified by regression tests.
+- [x] 16. `PLAN.md`: documented architecture, delivered scope, next phases, and safety rules.
+      README, CHANGELOG, and CONTRIBUTING now describe the CLI and webhook surfaces.
 - [ ] 11. Tag and push `v1` release (`git tag v1 && git push origin v1`), and a floating
       major tag `v1` per Actions marketplace convention (or `git tag -f v1` re-point pattern).
 - [ ] 12. Final verification: fresh `git clone` into a scratch dir, follow README instructions

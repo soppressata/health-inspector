@@ -38,12 +38,35 @@ inputs:
     description: 'GitHub token used to authenticate REST API calls.'
     required: false
     default: ${{ github.token }}
+  webhook-url:
+    description: 'Optional HTTPS endpoint to notify when new findings are reported.'
+    required: false
+  webhook-headers:
+    description: 'Optional JSON object of additional webhook headers.'
+    required: false
+  webhook-secret:
+    description: 'Optional secret value sent in the webhook secret header.'
+    required: false
+  webhook-secret-header:
+    description: 'Header name used for webhook-secret.'
+    required: false
+    default: 'X-Health-Inspector-Secret'
+  webhook-timeout-ms:
+    description: 'Webhook request timeout in milliseconds.'
+    required: false
+    default: '5000'
+  webhook-retries:
+    description: 'Number of retries for transient webhook failures.'
+    required: false
+    default: '3'
 
 outputs:
   findings-count:
     description: 'Number of confirmed findings reported.'
   report-url:
     description: 'URL of the filed issue report, if any.'
+  webhook-delivered:
+    description: 'Whether a findings webhook was delivered.'
 
 runs:
   using: node20

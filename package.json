@@ -5,6 +5,9 @@
   "type": "module",
   "private": true,
   "main": "src/index.js",
+  "bin": {
+    "health-inspector": "bin/health-inspector.js"
+  },
   "scripts": {
     "build": "ncc build src/index.js -o dist",
     "test": "node --test tests/*.test.js"

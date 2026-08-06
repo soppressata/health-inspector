@@ -7,6 +7,7 @@ import { scanRepo } from './scan.js';
 import { inspectCandidates } from './inspect.js';
 import { loadState, saveState } from './state.js';
 import { fileReport, makeGithubClient } from './github.js';
+import { notifyWebhook } from './webhook.js';
 
 /**
  * Read a GitHub Actions input from the environment. Input names are mapped
@@ -47,6 +48,14 @@ function writeOutput(name, value) {
   }
 }
 
+function parseWebhookHeaders(value) {
+  if (!value) return {};
+  let parsed;
+  try { parsed = JSON.parse(value); } catch { throw new Error('Invalid webhook-headers: expected a JSON object'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid webhook-headers: expected a JSON object');
+  return parsed;
+}
+
 export async function main() {
   const apiKey = getInput('api-key');
   const baseUrl = getInput('base-url') || 'https://api.deepseek.com';
@@ -56,6 +65,7 @@ export async function main() {
   const label = getInput('label') || 'health-inspector';
   const stateBranch = getInput('state-branch') || 'health-inspector-state';
   const githubToken = getInput('github-token');
+  const webhookUrl = getInput('webhook-url');
   const rootDir = path.resolve(getInput('paths') || '.');
   const { owner, repo } = parseOwnerRepo(process.env.GITHUB_REPOSITORY);
 
@@ -108,6 +118,23 @@ export async function main() {
     stateBranch,
     state: result.updatedState,
   });
+
+  if (webhookUrl && result.newFindings && result.newFindings.length > 0) {
+    const webhook = await notifyWebhook({
+      url: webhookUrl,
+      repository: `${owner}/${repo}`,
+      ref: currentRef,
+      findings: result.newFindings,
+      reportUrl: result.issueUrl || null,
+      headers: parseWebhookHeaders(getInput('webhook-headers')),
+      secret: getInput('webhook-secret'),
+      secretHeader: getInput('webhook-secret-header') || 'X-Health-Inspector-Secret',
+      timeoutMs: Number.parseInt(getInput('webhook-timeout-ms') || '5000', 10),
+      retries: Number.parseInt(getInput('webhook-retries') || '3', 10),
+    });
+    writeOutput('webhook-delivered', String(Boolean(webhook.delivered)));
+    if (!webhook.delivered) log(`Webhook delivery failed after ${webhook.attempts || 1} attempt(s); continuing.`);
+  }
 
   writeOutput('findings-count', String(findings.length));
   if (result.filed && result.issueUrl) writeOutput('report-url', result.issueUrl);

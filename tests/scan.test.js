@@ -97,7 +97,7 @@ test('bare_except: flags empty and comment-only catch blocks, not real handlers'
     path.join(repo, 'src/handlers.js'),
     [
       'export function emptyCatch() {',
-      '  try { doThing() } catch (e) {}',
+      '  try { doThing() } catch {}',
       '}',
       'export function commented() {',
       '  try { doThing() } catch (e) {',
@@ -196,4 +196,9 @@ test('falls back to a full scan when sinceRef is invalid and git diff fails', as
 
   const result = await scanRepo({ rootDir: repo, sinceRef: 'does-not-exist-ref', maxCandidates: 50 });
   assert.ok(result.some((c) => c.type === 'todo_fixme' && c.file === 'src/only.js'));
+});
+
+test('rejects an invalid maxCandidates cap', async () => {
+  await assert.rejects(() => scanRepo({ rootDir: process.cwd(), maxCandidates: 0 }), /positive integer/);
+  await assert.rejects(() => scanRepo({ rootDir: process.cwd(), maxCandidates: 1.5 }), /positive integer/);
 });

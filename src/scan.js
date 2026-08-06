@@ -67,12 +67,17 @@ function walk(dir, out = []) {
 
 function allTracked(rootDir) {
   try {
-    const out = execFileSync('git', ['ls-files'], {
+    const tracked = execFileSync('git', ['ls-files'], {
       cwd: rootDir,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const files = out.split('\n').map((s) => s.trim()).filter(Boolean);
+    const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], {
+      cwd: rootDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const files = [...tracked.split('\n'), ...untracked.split('\n')].map((s) => s.trim()).filter(Boolean);
     if (files.length > 0) return files;
   } catch {
     // fall through to a plain walk of the tree
@@ -133,7 +138,7 @@ function isCommentOnlyJs(body) {
 function checkBareExceptJs(file, lines) {
   const out = [];
   const text = lines.join('\n');
-  const re = /catch\s*\([^)]*\)\s*\{/g;
+  const re = /catch\s*(?:\([^)]*\)\s*)?\{/g;
   for (const m of text.matchAll(re)) {
     const open = text.indexOf('{', m.index);
     const close = matchBrace(text, open);
@@ -249,6 +254,9 @@ function checkUntestedNewFunction(rootDir, file, content) {
 }
 
 export async function scanRepo({ rootDir, sinceRef, maxCandidates } = {}) {
+  if (maxCandidates !== undefined && (!Number.isInteger(maxCandidates) || maxCandidates <= 0)) {
+    throw new TypeError('scanRepo: maxCandidates must be a positive integer');
+  }
   const dir = path.resolve(rootDir || process.cwd());
 
   let files = sinceRef ? changedFilesSince(dir, sinceRef) : null;
@@ -274,6 +282,6 @@ export async function scanRepo({ rootDir, sinceRef, maxCandidates } = {}) {
   }
 
   candidates.sort((a, b) => b.severity_hint - a.severity_hint);
-  const cap = Number.isFinite(maxCandidates) && maxCandidates > 0 ? maxCandidates : Infinity;
+  const cap = maxCandidates === undefined ? Infinity : maxCandidates;
   return candidates.slice(0, cap);
 }

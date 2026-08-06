@@ -62,8 +62,25 @@ test('does not call the API when every finding was already reported', async () =
     state,
   });
 
-  assert.deepEqual(result, { filed: false, reason: 'all findings already reported' });
+  assert.deepEqual(result, {
+    filed: false,
+    reason: 'all findings already reported',
+    newFindings: [],
+    updatedState: state,
+  });
   assert.equal(client.issues.length, 0);
+});
+
+test('returns only new findings and preserves state when there is nothing new', async () => {
+  const client = memoryClient();
+  const f = finding('todo_fixme', '// TODO: already seen');
+  const state = { lastScannedRef: 'sha', filedFingerprints: [fingerprintFinding(f)] };
+
+  const result = await fileReport({ octokitLike: client, owner: 'o', repo: 'r', label: 'l', reportMarkdown: '', findings: [f], state });
+
+  assert.deepEqual(result.newFindings, []);
+  assert.equal(result.updatedState, state);
+  assert.deepEqual(state, { lastScannedRef: 'sha', filedFingerprints: [fingerprintFinding(f)] });
 });
 
 test('dedups already-filed findings and only files the new ones', async () => {
@@ -85,6 +102,7 @@ test('dedups already-filed findings and only files the new ones', async () => {
   assert.equal(result.filed, true);
   assert.equal(client.issues.length, 1);
   assert.equal(client.issues[0].title, '[Health Inspector] 1 new finding(s)');
+  assert.deepEqual(result.newFindings, [fresh]);
   assert.deepEqual(result.updatedState.filedFingerprints, [fingerprintFinding(old), fingerprintFinding(fresh)]);
 });
 
@@ -122,6 +140,11 @@ test('empty findings short-circuit without touching the API', async () => {
     state,
   });
 
-  assert.deepEqual(result, { filed: false, reason: 'all findings already reported' });
+  assert.deepEqual(result, {
+    filed: false,
+    reason: 'all findings already reported',
+    newFindings: [],
+    updatedState: state,
+  });
   assert.equal(client.issues.length, 0);
 });
