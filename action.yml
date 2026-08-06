@@ -34,6 +34,10 @@ inputs:
     description: 'Branch used to persist state (last-scanned ref, filed fingerprints).'
     required: false
     default: 'health-inspector-state'
+  github-token:
+    description: 'GitHub token used to authenticate REST API calls.'
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   findings-count:
