@@ -188,7 +188,7 @@ export async function inspectCandidates({ candidates, apiKey, baseUrl, model, ma
 
   const tokensUsed = Number.isFinite(Number(data.usage && data.usage.total_tokens))
     ? Number(data.usage.total_tokens)
-    : null;
+    : 0;
 
   const reportMarkdown = buildReport(findings, parsed.summary_markdown);
   return { findings, reportMarkdown, tokensUsed };

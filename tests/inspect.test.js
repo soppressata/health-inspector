@@ -153,7 +153,7 @@ test('throws on non-2xx API responses', async () => {
   );
 });
 
-test('tokensUsed is null when usage.total_tokens is absent', async () => {
+test('tokensUsed is 0 when usage.total_tokens is absent', async () => {
   mockFetch(() =>
     jsonResponse(200, {
       choices: [{ message: { content: JSON.stringify({ findings: [], summary_markdown: '' }) } }],
@@ -166,7 +166,7 @@ test('tokensUsed is null when usage.total_tokens is absent', async () => {
     model: 'm',
     maxOutputTokens: 100,
   });
-  assert.equal(result.tokensUsed, null);
+  assert.equal(result.tokensUsed, 0);
   assert.equal(result.findings.length, 0);
 });
 

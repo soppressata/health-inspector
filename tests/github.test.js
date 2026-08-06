@@ -44,7 +44,8 @@ test('files one issue for all new findings and records their fingerprints', asyn
   assert.equal(client.issues[0].owner, 'o');
   assert.equal(client.issues[0].repo, 'r');
   assert.deepEqual(result.updatedState.filedFingerprints, [fingerprintFinding(f1), fingerprintFinding(f2)]);
-  assert.equal(result.updatedState, state, 'mutates and returns the passed-in state');
+  assert.equal(state.filedFingerprints.length, 0, 'original state array must not be mutated');
+  assert.deepEqual(result.updatedState, { lastScannedRef: 'sha', filedFingerprints: [fingerprintFinding(f1), fingerprintFinding(f2)] });
 });
 
 test('does not call the API when every finding was already reported', async () => {
@@ -275,4 +276,38 @@ test('fileReport still works with a plain in-memory client (no real fetch)', asy
   assert.deepEqual(result.newFindings, [fresh]);
   assert.deepEqual(result.updatedState.filedFingerprints, [fingerprintFinding(fresh)]);
   assert.equal(count(), 0, 'no real fetch happened');
+});
+
+test('makeGithubClient getContent encodes nested content paths preserving slashes', async () => {
+  let capturedUrl = null;
+  const fetchImpl = async (url) => {
+    capturedUrl = url;
+    return {
+      ok: true, status: 200,
+      json: async () => ({ content: 'base64', sha: 'abc' }),
+      text: async () => JSON.stringify({ content: 'base64', sha: 'abc' }),
+    };
+  };
+  const client = makeGithubClient('token', { fetchImpl });
+
+  await client.getContent({ owner: 'o', repo: 'r', path: 'dir/file.json' });
+
+  assert.ok(capturedUrl, 'fetch was called');
+  assert.match(capturedUrl, /\/contents\/dir\/file\.json$/);
+  assert.equal(capturedUrl.includes('%2F'), false, 'slashes must not be percent-encoded');
+});
+
+test('makeGithubClient createOrUpdateFile encodes nested content paths preserving slashes', async () => {
+  let capturedUrl = null;
+  const fetchImpl = async (url, opts) => {
+    capturedUrl = url;
+    return { ok: true, status: 200, json: async () => ({ ok: true }), text: async () => '{}' };
+  };
+  const client = makeGithubClient('token', { fetchImpl });
+
+  await client.createOrUpdateFile({ owner: 'o', repo: 'r', path: 'dir/file.json', message: 'm', content: 'base64' });
+
+  assert.ok(capturedUrl, 'fetch was called');
+  assert.match(capturedUrl, /\/contents\/dir\/file\.json$/);
+  assert.equal(capturedUrl.includes('%2F'), false, 'slashes must not be percent-encoded');
 });

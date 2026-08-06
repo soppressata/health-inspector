@@ -40,9 +40,12 @@ export function signPayload(payload, secret) {
 
 export function verifySignature(payload, secret, signature) {
   if (typeof signature !== 'string') return false;
+  let hex = signature;
+  if (hex.startsWith('sha256=')) hex = hex.slice(7);
+  if (!hex || !/^[0-9a-fA-F]+$/.test(hex) || hex.length % 2 !== 0) return false;
   const expected = signPayload(payload, secret);
   const expectedBuf = Buffer.from(expected, 'hex');
-  const actualBuf = Buffer.from(signature, 'hex');
+  const actualBuf = Buffer.from(hex, 'hex');
   if (expectedBuf.length !== actualBuf.length) return false;
   return timingSafeEqual(expectedBuf, actualBuf);
 }

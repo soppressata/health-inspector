@@ -77,6 +77,32 @@ test('verifySignature returns a boolean for mismatched-length signatures', () =>
   assert.equal(verifySignature(payload, 'secret', ''), false);
 });
 
+test('verifySignature accepts a sha256= prefixed signature', () => {
+  const payload = { delivery_id: 'd1', findings: [] };
+  const secret = 'my-secret';
+  const sig = signPayload(payload, secret);
+  assert.equal(verifySignature(payload, secret, `sha256=${sig}`), true);
+});
+
+test('verifySignature still accepts raw hex signature (no prefix)', () => {
+  const payload = { delivery_id: 'd1', findings: [] };
+  const secret = 'my-secret';
+  const sig = signPayload(payload, secret);
+  assert.equal(verifySignature(payload, secret, sig), true);
+});
+
+test('verifySignature rejects an invalid sha256= prefixed signature', () => {
+  const payload = { delivery_id: 'd1', findings: [] };
+  const secret = 'my-secret';
+  assert.equal(verifySignature(payload, secret, 'sha256=deadbeef'), false);
+});
+
+test('verifySignature rejects sha256= signature signed with a different secret', () => {
+  const payload = { delivery_id: 'd1', findings: [] };
+  const sig = signPayload(payload, 'secret-one');
+  assert.equal(verifySignature(payload, 'secret-two', `sha256=${sig}`), false);
+});
+
 test('signingSecret adds a sha256 signature header', async () => {
   const payload = { delivery_id: 'sig-test-1', findings: [] };
   let capturedHeaders = {};

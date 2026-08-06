@@ -105,13 +105,17 @@ export function makeGithubClient(token, options = {}) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  function encodeContentPath(p) {
+    return String(p).split('/').map(encodeURIComponent).join('/');
+  }
+
   return {
     getContent: async ({ owner, repo, path, ref }) => {
       const query = ref ? `?ref=${encodeURIComponent(ref)}` : '';
-      return request('GET', `/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}${query}`);
+      return request('GET', `/repos/${owner}/${repo}/contents/${encodeContentPath(path)}${query}`);
     },
     createOrUpdateFile: async ({ owner, repo, path, ...payload }) => {
-      return request('PUT', `/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`, payload);
+      return request('PUT', `/repos/${owner}/${repo}/contents/${encodeContentPath(path)}`, payload);
     },
     createIssue: async ({ owner, repo, ...payload }) => {
       return request('POST', `/repos/${owner}/${repo}/issues`, payload);
@@ -150,10 +154,14 @@ export async function fileReport({ octokitLike, owner, repo, label, reportMarkdo
     labels: [label],
   });
 
+  const updatedState = {
+    ...state,
+    filedFingerprints: [...(state.filedFingerprints || [])],
+  };
   for (const f of newFindings) {
     const fp = fingerprintFinding(f);
-    if (!state.filedFingerprints.includes(fp)) state.filedFingerprints.push(fp);
+    if (!updatedState.filedFingerprints.includes(fp)) updatedState.filedFingerprints.push(fp);
   }
 
-  return { filed: true, issueUrl: issue.html_url, newFindings, updatedState: state };
+  return { filed: true, issueUrl: issue.html_url, newFindings, updatedState };
 }
