@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fileReport } from '../src/github.js';
+import { fileReport, makeGithubClient, isRetryable } from '../src/github.js';
 import { fingerprintFinding } from '../src/state.js';
 
 function memoryClient() {
@@ -147,4 +147,132 @@ test('empty findings short-circuit without touching the API', async () => {
     updatedState: state,
   });
   assert.equal(client.issues.length, 0);
+});
+
+function mockFetch(responses) {
+  let count = 0;
+  const fetchImpl = async (url, opts = {}) => {
+    const index = count++;
+    const entry = responses[index];
+    if (typeof entry === 'function') {
+      return entry(url, opts);
+    }
+    const { status = 200, body = {} } = entry;
+    const text = JSON.stringify(body);
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+      text: async () => text,
+    };
+  };
+  return { count: () => count, fetchImpl };
+}
+
+test('isRetryable classifies transient and 5xx statuses as retryable', () => {
+  assert.equal(isRetryable(200), false);
+  assert.equal(isRetryable(404), false);
+  assert.equal(isRetryable(408), true);
+  assert.equal(isRetryable(425), true);
+  assert.equal(isRetryable(429), true);
+  assert.equal(isRetryable(500), true);
+  assert.equal(isRetryable(503), true);
+  assert.equal(isRetryable(599), true);
+  assert.equal(isRetryable(600), false);
+});
+
+test('makeGithubClient retries on transient 503 then succeeds on 200', async () => {
+  const { count, fetchImpl } = mockFetch([
+    { status: 503, body: { message: 'transient failure' } },
+    { status: 200, body: { id: 42 } },
+  ]);
+  const client = makeGithubClient('token', {
+    timeoutMs: 1000,
+    maxRetries: 3,
+    retryBaseMs: 1,
+    fetchImpl,
+  });
+
+  const result = await client.getRepo({ owner: 'o', repo: 'r' });
+  assert.deepEqual(result, { id: 42 });
+  assert.equal(count(), 2);
+});
+
+test('makeGithubClient throws immediately on non-retryable 404 without retrying', async () => {
+  const { count, fetchImpl } = mockFetch([
+    { status: 404, body: { message: 'not found' } },
+  ]);
+  const client = makeGithubClient('token', {
+    timeoutMs: 1000,
+    maxRetries: 3,
+    retryBaseMs: 1,
+    fetchImpl,
+  });
+
+  await assert.rejects(
+    client.getRepo({ owner: 'o', repo: 'r' }),
+    (err) => err.status === 404,
+  );
+  assert.equal(count(), 1);
+});
+
+test('makeGithubClient aborts and throws when fetch hangs', async () => {
+  let count = 0;
+  const fetchImpl = (url, { signal } = {}) => {
+    count++;
+    return new Promise((_, reject) => {
+      const onAbort = () =>
+        reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener('abort', onAbort, { once: true });
+      // intentionally never resolves — hangs until aborted
+    });
+  };
+  const client = makeGithubClient('token', { timeoutMs: 50, maxRetries: 0, fetchImpl });
+
+  const start = Date.now();
+  await assert.rejects(
+    client.getRepo({ owner: 'o', repo: 'r' }),
+    (err) => err && err.name === 'AbortError',
+  );
+  const elapsed = Date.now() - start;
+  assert.equal(count, 1);
+  assert.ok(elapsed >= 40, `expected abort within ~50ms, took ${elapsed}ms`);
+});
+
+test('fileReport still works with a plain in-memory client (no real fetch)', async () => {
+  // Regression guard: fileReport takes an arbitrary octokitLike object and must
+  // not depend on makeGithubClient internals.
+  const { count, fetchImpl } = mockFetch([]);
+  const client = makeGithubClient('token', { fetchImpl });
+  // Sanity: the real client is *not* used by this path.
+  assert.equal(count(), 0);
+
+  const state = { lastScannedRef: 'sha', filedFingerprints: [] };
+  const fresh = finding('secret_like', 'const api_key = "abcdefghijklm";');
+
+  const result = await fileReport({
+    octokitLike: {
+      createIssue: async (payload) => ({
+        html_url: 'https://github.com/o/r/issues/42',
+        number: 42,
+        ...payload,
+      }),
+    },
+    owner: 'o',
+    repo: 'r',
+    label: 'health-inspector',
+    reportMarkdown: 'one new thing',
+    findings: [fresh],
+    state,
+  });
+
+  assert.equal(result.filed, true);
+  assert.equal(result.issueUrl, 'https://github.com/o/r/issues/42');
+  assert.deepEqual(result.newFindings, [fresh]);
+  assert.deepEqual(result.updatedState.filedFingerprints, [fingerprintFinding(fresh)]);
+  assert.equal(count(), 0, 'no real fetch happened');
 });
