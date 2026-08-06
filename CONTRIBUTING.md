@@ -44,8 +44,9 @@ Each new surface has dedicated test coverage:
   `recordDelivery`/`wasDelivered`.
 - **Webhook HMAC signing** (`tests/webhook.test.js`): tests `signPayload` /
   `verifySignature` (HMAC-SHA256, timing-safe, tampered/wrong-secret rejection,
-  header-injection prevention), replay protection, durable outbox,
-  `drainOutbox`, and `notifyWebhook` pass-through.
+  header-injection prevention, accepts both raw hex and `sha256=<hex>` header
+  forms), replay protection, durable outbox, `drainOutbox`, and `notifyWebhook`
+  pass-through.
 - **GitHub client** (`tests/github.test.js`): tests `isRetryable`
   classification, `makeGithubClient` timeout/retry-with-backoff behaviour, and
   `fileReport` dedup short-circuit.
