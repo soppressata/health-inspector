@@ -15,15 +15,18 @@ jobs:
           node-version: '20'
       - run: npm ci
       - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: '1.7.7'
         run: |
-          set -e
-          url=$(curl -sSL https://api.github.com/repos/rhysd/actionlint/releases/latest \
-            | grep "browser_download_url.*linux_amd64\.tar\.gz" | head -1 | cut -d '"' -f 4)
-          curl -sSL "$url" -o /tmp/actionlint.tar.gz
-          tar -xzf /tmp/actionlint.tar.gz -C /tmp
-          /tmp/actionlint --version
-      - name: actionlint (action.yml + workflows)
-        run: /tmp/actionlint
+          set -euo pipefail
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          curl -sSfL "${base}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" -o /tmp/actionlint.tar.gz
+          file /tmp/actionlint.tar.gz | grep -qi 'gzip\|tar'
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          sudo mv /tmp/actionlint /usr/local/bin/actionlint
+          actionlint --version
+      - name: actionlint (actionlint)
+        run: actionlint -color
       - name: node --check all src + bin files
         run: |
           for f in src/*.js bin/*.js; do node --check "$f"; done
