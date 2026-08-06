@@ -26,8 +26,9 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
       (had to detune it once — GitHub's own push protection blocked the first, too-realistic
       version), and a swallowed `catch (e) {}`. Verified: `scanRepo` against this dir returns
       exactly [secret_like, bare_except, todo_fixme].
-- [ ] 8. `.github/workflows/ci.yml` — install deps, run unit tests + lint on push/PR. Must be
-      green before touching self-test.
+- [x] 8. `.github/workflows/ci.yml` — node --check on all src files + `npm test`. Verified:
+      real run https://github.com/soppressata/health-inspector/actions/runs/31071274820 green
+      (13s, `gh run watch --exit-status` exit 0).
 - [ ] 9. `.github/workflows/self-test.yml` — workflow_dispatch + on-push job that runs the
       action for real against `demo/health-inspector-demo/`, sourcing the API key from the
       already-authenticated local opencode-go Deepseek credential path agreed with the user
