@@ -33,20 +33,44 @@ locally:
 
 ```bash
 # 1. Start the mock LLM in one terminal (defaults to port 8842)
-node demo/mock-llm-server.js
+node demo/mock-llm-server.js &
+MOCK_PID=$!
 
-# 2. In another terminal, run this repo's action against the demo fixture.
-#    Point BASE_URL at the mock so no real API key is needed, and set a
-#    local GH_TOKEN with repo scope for issue/state operations:
-export GH_TOKEN=ghp_...
-export MOCK_BASE_URL=http://127.0.0.1:8842
+# 2. Wait until the mock is responding
+for i in $(seq 1 20); do
+  if curl -sf -X POST http://localhost:8842/chat/completions -d '{}' \
+       -H 'content-type: application/json' >/dev/null; then
+    echo "mock server is up"
+    break
+  fi
+  sleep 0.5
+done
 
-# 3. Invoke the action against demo/health-inspector-demo/
-node src/index.js
+# 3. Run this repo's action against the demo fixture. The action reads
+#    INPUT_* env vars (see action.yml); several of those names contain dashes
+#    (e.g. INPUT_GITHUB-TOKEN), which bash `export` cannot set, so `env` is
+#    used to pass them. The mock substitutes for a real LLM, so no provider
+#    key is needed.
+env \
+  GITHUB_REPOSITORY=soppressata/health-inspector \
+  INPUT_GITHUB-TOKEN="$(gh auth token)" \
+  INPUT_API-KEY=mock-key-local \
+  INPUT_BASE-URL=http://localhost:8842 \
+  INPUT_MODEL=mock-model \
+  INPUT_PROBABILITY=1.0 \
+  INPUT_MAX-CANDIDATES=15 \
+  INPUT_LABEL=health-inspector \
+  INPUT_STATE-BRANCH=health-inspector-state \
+  INPUT_PATHS=demo/health-inspector-demo \
+  node src/index.js
+
+# 4. Stop the mock LLM
+kill "$MOCK_PID" 2>/dev/null
 ```
 
 The mock confirms every candidate with `severity: medium`, so a green run
-should produce a report issue and persist state on `health-inspector-state`.
+should produce a report issue (only for findings not already filed — see
+`src/github.js`) and persist state on `health-inspector-state`.
 
 ## Code style
 
