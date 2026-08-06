@@ -49,11 +49,34 @@ export async function loadState({ octokitLike, owner, repo, stateBranch }) {
 }
 
 /**
+ * The Contents API rejects writes to a branch that doesn't exist yet (it does not
+ * create branches implicitly) - so on first use, health-inspector-state has to be
+ * created explicitly from the default branch's current commit before we can write
+ * state.json to it. `getRef`/`createRef` are optional on octokitLike: clients that
+ * don't provide them (e.g. simple in-memory test doubles) just skip this step.
+ * @param {{getRef?: Function, createRef?: Function, getRepo?: Function}} octokitLike
+ */
+async function ensureBranchExists({ octokitLike, owner, repo, branch }) {
+  if (!octokitLike.getRef || !octokitLike.createRef) return;
+  try {
+    await octokitLike.getRef({ owner, repo, ref: `heads/${branch}` });
+    return;
+  } catch (err) {
+    if (!err || err.status !== 404) throw err;
+  }
+  const repoInfo = octokitLike.getRepo ? await octokitLike.getRepo({ owner, repo }) : null;
+  const defaultBranch = (repoInfo && repoInfo.default_branch) || 'main';
+  const baseRef = await octokitLike.getRef({ owner, repo, ref: `heads/${defaultBranch}` });
+  await octokitLike.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: baseRef.object.sha });
+}
+
+/**
  * @param {object} args
  * @param {{getContent: Function, createOrUpdateFile: Function}} args.octokitLike thin client
  */
 export async function saveState({ octokitLike, owner, repo, stateBranch, state }) {
   const payload = state ?? { ...DEFAULT_STATE };
+  await ensureBranchExists({ octokitLike, owner, repo, branch: stateBranch });
   let sha;
   try {
     const existing = await octokitLike.getContent({

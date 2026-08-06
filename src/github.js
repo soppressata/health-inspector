@@ -54,6 +54,15 @@ export function makeGithubClient(token) {
     createIssue: async ({ owner, repo, ...payload }) => {
       return request('POST', `/repos/${owner}/${repo}/issues`, payload);
     },
+    getRef: async ({ owner, repo, ref }) => {
+      return request('GET', `/repos/${owner}/${repo}/git/ref/${ref}`);
+    },
+    createRef: async ({ owner, repo, ...payload }) => {
+      return request('POST', `/repos/${owner}/${repo}/git/refs`, payload);
+    },
+    getRepo: async ({ owner, repo }) => {
+      return request('GET', `/repos/${owner}/${repo}`);
+    },
   };
 }
 

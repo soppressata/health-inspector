@@ -91,6 +91,63 @@ test('saveState updates an existing file with its sha (no duplicate create)', as
   assert.ok(calls[0].content.length > 0);
 });
 
+test('saveState creates the state branch from the default branch when it does not exist yet', async () => {
+  const client = memoryClient();
+  const refs = new Map([['heads/main', { object: { sha: 'main-sha' } }]]);
+  const createdRefs = [];
+  const richClient = {
+    ...client,
+    getRef: async ({ ref }) => {
+      const entry = refs.get(ref);
+      if (!entry) throw { status: 404 };
+      return entry;
+    },
+    createRef: async ({ ref, sha }) => {
+      createdRefs.push({ ref, sha });
+      refs.set(ref.replace(/^refs\//, ''), { object: { sha } });
+      return { ref, object: { sha } };
+    },
+    getRepo: async () => ({ default_branch: 'main' }),
+  };
+
+  await saveState({
+    octokitLike: richClient,
+    owner: 'o',
+    repo: 'r',
+    stateBranch: 'health-inspector-state',
+    state: { lastScannedRef: 'abc', filedFingerprints: [] },
+  });
+
+  assert.equal(createdRefs.length, 1);
+  assert.equal(createdRefs[0].ref, 'refs/heads/health-inspector-state');
+  assert.equal(createdRefs[0].sha, 'main-sha');
+  assert.ok(client.store.get('health-inspector-state'));
+});
+
+test('saveState does not create a branch that already exists', async () => {
+  const client = memoryClient({ 'health-inspector-state': { content: Buffer.from(JSON.stringify(DEFAULT)).toString('base64') } });
+  const createdRefs = [];
+  const richClient = {
+    ...client,
+    getRef: async () => ({ object: { sha: 'already-there' } }),
+    createRef: async (args) => {
+      createdRefs.push(args);
+      throw new Error('should not be called');
+    },
+    getRepo: async () => ({ default_branch: 'main' }),
+  };
+
+  await saveState({
+    octokitLike: richClient,
+    owner: 'o',
+    repo: 'r',
+    stateBranch: 'health-inspector-state',
+    state: { lastScannedRef: 'def', filedFingerprints: [] },
+  });
+
+  assert.equal(createdRefs.length, 0);
+});
+
 test('fingerprintFinding is stable for identical findings', () => {
   const a = fingerprintFinding({ file: 'src/a.js', type: 'todo_fixme', snippet: '// TODO: hi' });
   const b = fingerprintFinding({ file: 'src/a.js', type: 'todo_fixme', snippet: '// TODO: hi' });
