@@ -12,11 +12,10 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
       untested_new_function, oversized_function. Ranked + capped. git-diff-based when
       sinceRef given, falls back to full scan. Verified: 8/8 unit tests pass (`npm test`),
       real git fixtures via mkdtempSync.
-- [ ] 4. `src/inspect.*` — Stage 1: skip entirely if scan.* found nothing (0 tokens). Else one
-      batched HTTP POST to {base-url}/chat/completions (OpenAI-compatible schema) with only
-      the top-N capped/truncated candidate snippets, asking for confirm/reject + severity +
-      one concise markdown report. Hard max_tokens cap. Unit tests with mocked HTTP (no live
-      network in unit tests).
+- [x] 4. `src/inspect.js` — Stage 1: zero-fetch short-circuit on empty candidates, else one
+      batched POST to {base-url}/chat/completions, snippets capped 30 lines/1200 chars,
+      temperature 0, max_tokens cap, JSON-fence-tolerant parsing. Verified: 14/14 tests pass
+      (`npm test`), fetch is stubbed in tests (no live network).
 - [ ] 5. `src/github.*` — dedup against existing open "health-inspector"-labeled issues by
       fingerprint before filing; create/update issue with bot-persona report. Unit tests.
 - [ ] 6. `src/state.*` — persist last-scanned git ref + filed fingerprints (e.g. a small JSON
