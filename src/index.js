@@ -8,6 +8,7 @@ import { inspectCandidates } from './inspect.js';
 import { loadState, saveState } from './state.js';
 import { fileReport, makeGithubClient } from './github.js';
 import { notifyWebhook } from './webhook.js';
+import { resolveConfig, loadConfigFile } from './config.js';
 
 /**
  * Read a GitHub Actions input from the environment. Input names are mapped
@@ -56,34 +57,101 @@ function parseWebhookHeaders(value) {
   return parsed;
 }
 
+/**
+ * Read a single Action input, returning `undefined` (not '') for empty values
+ * so that `resolveConfig`'s `defineFrom` falls back to file/env/default values.
+ * @param {string} name
+ * @returns {string | undefined}
+ */
+function input(name) {
+  const value = getInput(name);
+  return value === undefined || value === '' ? undefined : value;
+}
+
+function intInput(name) {
+  const value = input(name);
+  return value === undefined ? undefined : Number.parseInt(value, 10);
+}
+
+function floatInput(name) {
+  const value = input(name);
+  return value === undefined ? undefined : Number.parseFloat(value);
+}
+
+/**
+ * Build the resolved configuration the same way the CLI does: merge Action
+ * inputs (flags) > environment variables > `.health-inspector.json` >
+ * defaults. Extracted from `main()` so the merge logic is unit-testable.
+ *
+ * @param {string} rootDir - repository root (the `paths` input resolved).
+ * @returns {object} fully-resolved, validated config.
+ */
+export function buildActionConfig(rootDir) {
+  const webhookHeadersInput = input('webhook-headers');
+  const flags = {
+    apiKey: input('api-key'),
+    baseUrl: input('base-url'),
+    model: input('model'),
+    maxCandidates: intInput('max-candidates'),
+    probability: floatInput('probability'),
+    label: input('label'),
+    stateBranch: input('state-branch'),
+    githubToken: input('github-token'),
+    webhookUrl: input('webhook-url'),
+    webhookHeaders: webhookHeadersInput ? parseWebhookHeaders(webhookHeadersInput) : undefined,
+    webhookSecret: input('webhook-secret'),
+    webhookSecretHeader: input('webhook-secret-header'),
+    webhookTimeoutMs: intInput('webhook-timeout-ms'),
+    webhookRetries: intInput('webhook-retries'),
+    webhookSigningSecret: input('webhook-signing-secret'),
+    webhookSignatureHeader: input('webhook-signature-header'),
+  };
+  return resolveConfig({
+    flags,
+    env: process.env,
+    fileConfig: loadConfigFile(rootDir),
+    defaults: {},
+  });
+}
+
+/**
+ * Build the timeout/retry options for the GitHub client from Action inputs.
+ * Extracted so the input parsing is unit-testable.
+ * @returns {{timeoutMs: number, maxRetries: number}}
+ */
+export function buildGithubClientOptions() {
+  return {
+    timeoutMs: Number.parseInt(getInput('github-request-timeout-ms') || '15000', 10),
+    maxRetries: Number.parseInt(getInput('github-max-retries') || '3', 10),
+  };
+}
+
 export async function main() {
-  const apiKey = getInput('api-key');
-  const baseUrl = getInput('base-url') || 'https://api.deepseek.com';
-  const model = getInput('model') || 'deepseek-chat';
-  const probability = Number.parseFloat(getInput('probability') || '1.0');
-  const maxCandidates = Number.parseInt(getInput('max-candidates') || '15', 10);
-  const label = getInput('label') || 'health-inspector';
-  const stateBranch = getInput('state-branch') || 'health-inspector-state';
-  const githubToken = getInput('github-token');
-  const webhookUrl = getInput('webhook-url');
-  const rootDir = path.resolve(getInput('paths') || '.');
+  const rootDir = path.resolve(input('paths') || '.');
+  const config = buildActionConfig(rootDir);
   const { owner, repo } = parseOwnerRepo(process.env.GITHUB_REPOSITORY);
 
-  if (!apiKey) throw new Error('Missing required input: api-key');
-  if (!githubToken) throw new Error('Missing required input: github-token');
-  if (!Number.isFinite(probability) || probability < 0 || probability > 1) {
-    throw new Error(`Invalid probability '${getInput('probability')}': expected a number in [0, 1]`);
-  }
+  if (!config.apiKey) throw new Error('Missing required input: api-key');
+  if (!config.githubToken) throw new Error('Missing required input: github-token');
 
-  if (Math.random() > probability) {
+  if (Math.random() > config.probability) {
     log('Inspection skipped this cycle (unannounced by design).');
     writeOutput('findings-count', '0');
     return;
   }
 
-  const github = makeGithubClient(githubToken);
-  const loaded = await loadState({ octokitLike: github, owner, repo, stateBranch });
-  const candidates = await scanRepo({ rootDir, sinceRef: loaded.lastScannedRef, maxCandidates });
+  const githubToken = config.githubToken;
+  const github = makeGithubClient(githubToken, buildGithubClientOptions());
+  const loaded = await loadState({ octokitLike: github, owner, repo, stateBranch: config.stateBranch });
+
+  const candidates = await scanRepo({
+    rootDir,
+    sinceRef: loaded.lastScannedRef,
+    maxCandidates: config.maxCandidates,
+    oversizedLines: config.oversizedFunctionLines,
+    rules: config.rules,
+    excludeRules: config.excludeRules,
+  });
   const currentRef = headRef(rootDir);
 
   if (candidates.length === 0) {
@@ -92,7 +160,7 @@ export async function main() {
       octokitLike: github,
       owner,
       repo,
-      stateBranch,
+      stateBranch: config.stateBranch,
       state: { ...loaded, lastScannedRef: currentRef },
     });
     writeOutput('findings-count', '0');
@@ -100,13 +168,18 @@ export async function main() {
   }
 
   log(`Found ${candidates.length} candidate(s); asking the model to inspect.`);
-  const { findings, reportMarkdown } = await inspectCandidates({ candidates, apiKey, baseUrl, model });
+  const { findings, reportMarkdown } = await inspectCandidates({
+    candidates,
+    apiKey: config.apiKey,
+    baseUrl: config.baseUrl,
+    model: config.model,
+  });
   const state = { ...loaded, lastScannedRef: currentRef };
   const result = await fileReport({
     octokitLike: github,
     owner,
     repo,
-    label,
+    label: config.label,
     reportMarkdown,
     findings,
     state,
@@ -115,24 +188,29 @@ export async function main() {
     octokitLike: github,
     owner,
     repo,
-    stateBranch,
+    stateBranch: config.stateBranch,
     state: result.updatedState,
   });
 
-  if (webhookUrl && result.newFindings && result.newFindings.length > 0) {
+  if (config.webhookUrl && result.newFindings && result.newFindings.length > 0) {
     const webhook = await notifyWebhook({
-      url: webhookUrl,
+      url: config.webhookUrl,
       repository: `${owner}/${repo}`,
       ref: currentRef,
       findings: result.newFindings,
       reportUrl: result.issueUrl || null,
-      headers: parseWebhookHeaders(getInput('webhook-headers')),
-      secret: getInput('webhook-secret'),
-      secretHeader: getInput('webhook-secret-header') || 'X-Health-Inspector-Secret',
-      timeoutMs: Number.parseInt(getInput('webhook-timeout-ms') || '5000', 10),
-      retries: Number.parseInt(getInput('webhook-retries') || '3', 10),
+      headers: config.webhookHeaders,
+      secret: config.webhookSecret,
+      secretHeader: config.webhookSecretHeader,
+      timeoutMs: config.webhookTimeoutMs,
+      retries: config.webhookRetries,
+      signingSecret: config.webhookSigningSecret,
+      signatureHeader: config.webhookSignatureHeader,
     });
     writeOutput('webhook-delivered', String(Boolean(webhook.delivered)));
+    if (webhook.delivered) {
+      writeOutput('webhook-delivery-id', webhook.deliveryId);
+    }
     if (!webhook.delivered) log(`Webhook delivery failed after ${webhook.attempts || 1} attempt(s); continuing.`);
   }
 
