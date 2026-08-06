@@ -22,9 +22,10 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
 - [x] 6. `src/state.js` — `loadState`/`saveState` round-trip `state.json` on a dedicated
       `state-branch` via GitHub contents API (404 → defaults), `fingerprintFinding` (sha1,
       12 hex chars, whitespace-normalized). Verified: 26/26 total tests pass (`npm test`).
-- [ ] 7. `demo/health-inspector-demo/` — small fixture project with deliberate violations
-      (a TODO, a bare except, a new function with no test, a hardcoded-looking fake secret)
-      for the self-test to actually find.
+- [x] 7. `demo/health-inspector-demo/` — payments.js with a TODO, a fake-but-realistic secret
+      (had to detune it once — GitHub's own push protection blocked the first, too-realistic
+      version), and a swallowed `catch (e) {}`. Verified: `scanRepo` against this dir returns
+      exactly [secret_like, bare_except, todo_fixme].
 - [ ] 8. `.github/workflows/ci.yml` — install deps, run unit tests + lint on push/PR. Must be
       green before touching self-test.
 - [ ] 9. `.github/workflows/self-test.yml` — workflow_dispatch + on-push job that runs the
