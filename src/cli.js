@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import { resolveConfig, loadConfigFile, DEFAULT_CONFIG } from './config.js';
+import { resolveConfig, loadConfigFile } from './config.js';
 import { runInspection } from './core.js';
 import {
   loadLocalState,
@@ -160,7 +160,7 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
       fileConfig = loadConfigFile(rootDir);
     }
 
-    const config = resolveConfig({ flags, env: process.env, fileConfig, defaults: DEFAULT_CONFIG });
+    const config = resolveConfig({ flags, env: process.env, fileConfig });
 
     const stateFile = path.isAbsolute(config.stateFile)
       ? config.stateFile
@@ -192,23 +192,18 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
       const repository = gitRemoteRepo(rootDir);
       const payload = buildWebhookPayload({ repository, ref: result.ref, findings: newFindings });
       if (!wasDelivered(localState, payload)) {
-        try {
-          await notifyWebhook({
-            url: config.webhookUrl,
-            repository,
-            ref: result.ref,
-            findings: newFindings,
-            reportUrl: null,
-            secret: config.webhookSigningSecret,
-            secretHeader: config.webhookSignatureHeader,
-            headers: config.webhookHeaders || {},
-            timeoutMs: config.webhookTimeoutMs,
-            retries: config.webhookRetries,
-          });
-          updatedState = recordDelivery(updatedState, payload);
+        const webhookResult = await notifyWebhook(buildCliWebhookOptions(config, {
+          repository,
+          ref: result.ref,
+          findings: newFindings,
+          updatedState,
+          rootDir,
+        }));
+        if (webhookResult.delivered) {
+          updatedState = webhookResult.updatedState || recordDelivery(updatedState, payload);
           saveLocalState(stateFile, updatedState);
-        } catch (err) {
-          io.stderr.write(`health-inspector: webhook delivery failed: ${err.message}\n`);
+        } else if (!webhookResult.skipped) {
+          io.stderr.write(`health-inspector: webhook delivery failed after ${webhookResult.attempts || 1} attempt(s)\n`);
         }
       }
     }
@@ -225,4 +220,23 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
 
 export function writeResult(file, result, format = 'json') {
   fs.writeFileSync(file, formatResult(result, format), 'utf8');
+}
+
+export function buildCliWebhookOptions(config, { repository, ref, findings, updatedState, rootDir }) {
+  return {
+    url: config.webhookUrl,
+    repository,
+    ref,
+    findings,
+    reportUrl: null,
+    secret: config.webhookSecret,
+    secretHeader: config.webhookSecretHeader,
+    signingSecret: config.webhookSigningSecret,
+    signatureHeader: config.webhookSignatureHeader,
+    headers: config.webhookHeaders || {},
+    timeoutMs: config.webhookTimeoutMs,
+    retries: config.webhookRetries,
+    state: updatedState,
+    outboxDir: path.isAbsolute(config.outboxDir) ? config.outboxDir : path.resolve(rootDir, config.outboxDir),
+  };
 }

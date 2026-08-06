@@ -256,6 +256,14 @@ test('buildGithubClientOptions defaults to 15000ms and 3 retries', () => {
   assert.equal(opts.maxRetries, 3);
 });
 
+test('buildActionConfig parses INPUT_SCAN-PATHS into array', () => {
+  const dir = tmpDir();
+  withEnv({ 'INPUT_SCAN-PATHS': 'src tests' }, () => {
+    const config = buildActionConfig(dir);
+    assert.deepEqual(config.scanPaths, ['src', 'tests']);
+  });
+});
+
 test('buildGithubClientOptions reads INPUT_GITHUB-REQUEST-TIMEOUT-MS / GITHUB-MAX-RETRIES', () => {
   withEnv(
     { 'INPUT_GITHUB-REQUEST-TIMEOUT-MS': '20000', 'INPUT_GITHUB-MAX-RETRIES': '5' },

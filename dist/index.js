@@ -1363,6 +1363,11 @@ function buildActionConfig(rootDir) {
     webhookRetries: intInput('webhook-retries'),
     webhookSigningSecret: input('webhook-signing-secret'),
     webhookSignatureHeader: input('webhook-signature-header'),
+    scanPaths: (() => {
+      const raw = input('scan-paths');
+      if (!raw) return undefined;
+      return raw.split(/\s+/).map(s => s.trim()).filter(Boolean);
+    })(),
   };
   return resolveConfig({
     flags,

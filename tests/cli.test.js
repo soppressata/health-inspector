@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import { parseArgs, runCli, exitCodeFor, writeResult } from '../src/cli.js';
+import { parseArgs, runCli, exitCodeFor, writeResult, buildCliWebhookOptions } from '../src/cli.js';
 import { resolveConfig, loadConfigFile } from '../src/config.js';
 import { renderSarif, renderGithubAnnotation, renderMarkdownTable, formatResult } from '../src/output.js';
 import { SCAN_RULES } from '../src/scan.js';
@@ -293,4 +293,88 @@ test('writeResult writes JSON to a file', (t) => {
   writeResult(file, result, 'json');
   const data = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(data.findingsCount, 0);
+});
+
+test('buildCliWebhookOptions maps signingSecret/signatureHeader correctly (NOT secret/secretHeader)', () => {
+  const config = {
+    webhookUrl: 'https://hook.test/x',
+    webhookSigningSecret: 'sign-secret',
+    webhookSignatureHeader: 'X-My-Sig',
+    webhookSecret: 'plain-secret',
+    webhookSecretHeader: 'X-Plain-Secret',
+    webhookHeaders: { 'X-Custom': 'v' },
+    webhookTimeoutMs: 5000,
+    webhookRetries: 2,
+    outboxDir: '.hi/outbox',
+  };
+  const result = buildCliWebhookOptions(config, {
+    repository: 'org/repo',
+    ref: 'abc123',
+    findings: [{ type: 't', file: 'f.js', line: 1, severity: 'high', reason: 'r' }],
+    updatedState: { deliveries: [] },
+    rootDir: '/repo',
+  });
+  assert.equal(result.signingSecret, 'sign-secret');
+  assert.equal(result.signatureHeader, 'X-My-Sig');
+  assert.notEqual(result.secret, 'sign-secret');
+  assert.notEqual(result.secretHeader, 'X-My-Sig');
+});
+
+test('buildCliWebhookOptions maps webhookSecret → secret and webhookSecretHeader → secretHeader', () => {
+  const config = {
+    webhookUrl: 'https://hook.test/x',
+    webhookSecret: 'plain-secret',
+    webhookSecretHeader: 'X-Plain-Secret',
+    webhookHeaders: {},
+    webhookTimeoutMs: 5000,
+    webhookRetries: 2,
+    outboxDir: '.hi/outbox',
+  };
+  const result = buildCliWebhookOptions(config, {
+    repository: 'org/repo',
+    ref: 'abc123',
+    findings: [],
+    updatedState: { deliveries: [] },
+    rootDir: '/repo',
+  });
+  assert.equal(result.secret, 'plain-secret');
+  assert.equal(result.secretHeader, 'X-Plain-Secret');
+  assert.equal(result.signingSecret, undefined);
+  assert.equal(result.signatureHeader, undefined);
+});
+
+test('buildCliWebhookOptions resolves outboxDir relative to rootDir', () => {
+  const config = {
+    webhookUrl: 'https://hook.test/x',
+    webhookHeaders: {},
+    webhookTimeoutMs: 5000,
+    webhookRetries: 2,
+    outboxDir: '.hi/outbox',
+  };
+  const result = buildCliWebhookOptions(config, {
+    repository: 'org/repo',
+    ref: 'abc',
+    findings: [],
+    updatedState: { deliveries: [] },
+    rootDir: '/repo',
+  });
+  assert.equal(result.outboxDir, '/repo/.hi/outbox');
+});
+
+test('buildCliWebhookOptions passes through absolute outboxDir unchanged', () => {
+  const config = {
+    webhookUrl: 'https://hook.test/x',
+    webhookHeaders: {},
+    webhookTimeoutMs: 5000,
+    webhookRetries: 2,
+    outboxDir: '/abs/outbox',
+  };
+  const result = buildCliWebhookOptions(config, {
+    repository: 'org/repo',
+    ref: 'abc',
+    findings: [],
+    updatedState: { deliveries: [] },
+    rootDir: '/repo',
+  });
+  assert.equal(result.outboxDir, '/abs/outbox');
 });
