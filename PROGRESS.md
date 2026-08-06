@@ -36,9 +36,14 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
       Assert a report is produced / issue filed. Push, then `gh watch` until genuinely
       green — do not mark this done on a red or cancelled run. Verified: real GH Actions run
       https://github.com/soppressata/health-inspector/actions/runs/31071618670 green (24s).
-- [ ] 10. README.md: badges, pitch (esp. the low-token-usage design), quickstart (12-line
+- [x] 10. README.md: badges, pitch (esp. the low-token-usage design), quickstart (12-line
       workflow snippet), how the two-stage pipeline keeps cost near zero on clean repos.
       CONTRIBUTING.md, CHANGELOG.md (Keep a Changelog format), MIT LICENSE finalized.
+      Verified: rewrote README with CI/Self-test/MIT badges, refined pitch, full-input
+      quickstart + how-it-works + complete input/output tables (cross-checked against
+      action.yml: 9 inputs, 2 outputs); added CONTRIBUTING.md (npm test, local mock LLM
+      self-test, code style, PR review) and CHANGELOG.md (Keep a Changelog, Unreleased
+      pending v1.0.0). No inputs invented; LICENSE, src/, tests/, workflows untouched.
 - [ ] 11. Tag and push `v1` release (`git tag v1 && git push origin v1`), and a floating
       major tag `v1` per Actions marketplace convention (or `git tag -f v1` re-point pattern).
 - [ ] 12. Final verification: fresh `git clone` into a scratch dir, follow README instructions
