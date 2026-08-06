@@ -1,0 +1,68 @@
+name: Self-test (end-to-end, mocked LLM)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'action.yml'
+      - 'demo/**'
+      - '.github/workflows/self-test.yml'
+
+# Maintainer note: this proves the full scan -> inspect -> file-issue -> persist-state
+# pipeline end-to-end on real GitHub Actions infrastructure using the workflow's own
+# GITHUB_TOKEN. The LLM call is stubbed by demo/mock-llm-server.js instead of a real
+# provider key -- adopters configure a real `api-key` + `base-url` (see README); this
+# workflow only needs to prove the wiring, not re-prove a third-party API.
+jobs:
+  self-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Start mock LLM server
+        run: |
+          node demo/mock-llm-server.js &
+          echo $! > mock-server.pid
+          for i in $(seq 1 20); do
+            if curl -sf -X POST http://localhost:8842/chat/completions -d '{}' -H 'content-type: application/json' >/dev/null; then
+              echo "mock server is up"
+              break
+            fi
+            sleep 0.5
+          done
+
+      - name: Run Health Inspector against demo fixture
+        id: inspect
+        env:
+          INPUT_API-KEY: mock-key-self-test
+          INPUT_BASE-URL: http://localhost:8842
+          INPUT_MODEL: mock-model
+          INPUT_PROBABILITY: '1.0'
+          INPUT_MAX-CANDIDATES: '15'
+          INPUT_LABEL: health-inspector
+          INPUT_STATE-BRANCH: health-inspector-state
+          INPUT_GITHUB-TOKEN: ${{ github.token }}
+          INPUT_PATHS: demo/health-inspector-demo
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node src/index.js
+
+      - name: Stop mock server
+        if: always()
+        run: kill "$(cat mock-server.pid)" 2>/dev/null || true
+
+      - name: Assert findings-count output was produced
+        run: |
+          if [ -z "${{ steps.inspect.outputs.findings-count }}" ]; then
+            echo "::error::self-test did not produce a findings-count output"
+            exit 1
+          fi
+          echo "findings-count=${{ steps.inspect.outputs.findings-count }}"
