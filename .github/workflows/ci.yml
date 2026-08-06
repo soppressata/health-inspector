@@ -13,9 +13,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - run: npm ci
       - run: node --check src/index.js
       - run: node --check src/scan.js
       - run: node --check src/inspect.js
       - run: node --check src/state.js
       - run: node --check src/github.js
       - run: npm test
+      - run: npm run build
+      - name: Verify dist/ is in sync with src/
+        run: git diff --exit-code -- dist/

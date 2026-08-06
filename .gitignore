@@ -2,6 +2,7 @@ node_modules/
 __pycache__/
 *.pyc
 .env
-dist/
+# dist/ is committed build output (the Action runs dist/index.js directly).
+# Do NOT hand-edit; run `npm run build` after any src/ change, then re-commit.
 *.log
 .claude/
