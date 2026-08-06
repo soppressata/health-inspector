@@ -4,13 +4,17 @@ import path from 'node:path';
 
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist']);
 
-const SEVERITY_HINT = {
-  secret_like: 5,
-  bare_except: 4,
-  untested_new_function: 3,
-  oversized_function: 2,
-  todo_fixme: 1,
+export const SCAN_RULES = {
+  todo_fixme: { severityHint: 1, description: 'TODO or FIXME comment found', fileTypes: ['js', 'jsx', 'ts', 'tsx', 'py', 'go', 'rb', 'rs', 'c', 'cpp', 'h', 'hpp'] },
+  secret_like: { severityHint: 5, description: 'Potential secret or credential', fileTypes: [] },
+  bare_except: { severityHint: 4, description: 'Bare or empty catch block', fileTypes: ['js', 'jsx', 'ts', 'tsx', 'py'] },
+  untested_new_function: { severityHint: 3, description: 'New exported function has no test reference', fileTypes: ['js', 'jsx', 'ts', 'tsx'] },
+  oversized_function: { severityHint: 2, description: 'Function exceeds line threshold', fileTypes: ['js', 'jsx', 'ts', 'tsx', 'py'] },
 };
+
+const SEVERITY_HINT = Object.fromEntries(
+  Object.entries(SCAN_RULES).map(([k, v]) => [k, v.severityHint])
+);
 
 const SECRET_PATTERNS = [
   /AKIA[0-9A-Z]{16}/,
@@ -30,6 +34,12 @@ function candidate(type, file, line, snippet) {
 
 function isIgnored(file) {
   return file.split(/[\\/]/).some((seg) => IGNORE_DIRS.has(seg));
+}
+
+function matchesFileTypes(file, fileTypes) {
+  if (!fileTypes || fileTypes.length === 0) return true;
+  const ext = path.extname(file).slice(1);
+  return fileTypes.includes(ext);
 }
 
 function lineNumberAt(text, index) {
@@ -161,7 +171,7 @@ function checkBareExceptPy(file, lines) {
   return out;
 }
 
-function checkOversizedFunctionJs(file, lines) {
+function checkOversizedFunctionJs(file, lines, threshold = 80) {
   const out = [];
   const text = lines.join('\n');
   for (const m of text.matchAll(JS_FUNC_RE)) {
@@ -197,14 +207,14 @@ function checkOversizedFunctionJs(file, lines) {
     if (endLine === -1) continue;
 
     const span = endLine - startLine + 1;
-    if (span > 80) {
+    if (span > threshold) {
       out.push(candidate('oversized_function', file, startLine, (lines[startLine - 1] || '').trim()));
     }
   }
   return out;
 }
 
-function checkOversizedFunctionPy(file, lines) {
+function checkOversizedFunctionPy(file, lines, threshold = 80) {
   const out = [];
   const defRe = /^\s*def\s+[\w$]+\s*\(/;
   lines.forEach((line, i) => {
@@ -220,7 +230,7 @@ function checkOversizedFunctionPy(file, lines) {
       if (l.length - l.trimStart().length <= indent) break;
       end = j;
     }
-    if (end - i + 1 > 80) {
+    if (end - i + 1 > threshold) {
       out.push(candidate('oversized_function', file, i + 1, line.trim()));
     }
   });
@@ -253,10 +263,40 @@ function checkUntestedNewFunction(rootDir, file, content) {
   return [candidate('untested_new_function', file, exportLine + 1, (lines[exportLine] || '').trim())];
 }
 
-export async function scanRepo({ rootDir, sinceRef, maxCandidates } = {}) {
+export function listRules() {
+  return Object.keys(SCAN_RULES);
+}
+
+function validateRuleNames(names, optionName) {
+  if (names === undefined) return;
+  if (!Array.isArray(names)) {
+    throw new TypeError(`scanRepo: ${optionName} must be an array`);
+  }
+  for (const name of names) {
+    if (!Object.prototype.hasOwnProperty.call(SCAN_RULES, name)) {
+      throw new TypeError(`scanRepo: ${optionName} contains unknown rule name: ${name}`);
+    }
+  }
+}
+
+export async function scanRepo({ rootDir, sinceRef, maxCandidates, oversizedLines, rules, excludeRules } = {}) {
   if (maxCandidates !== undefined && (!Number.isInteger(maxCandidates) || maxCandidates <= 0)) {
     throw new TypeError('scanRepo: maxCandidates must be a positive integer');
   }
+  if (oversizedLines !== undefined && (!Number.isInteger(oversizedLines) || oversizedLines <= 0)) {
+    throw new TypeError('scanRepo: oversizedLines must be a positive integer');
+  }
+
+  validateRuleNames(rules, 'rules');
+  validateRuleNames(excludeRules, 'excludeRules');
+
+  const ruleNames = listRules();
+  const enabledRules = new Set(rules && rules.length > 0 ? rules : ruleNames);
+  if (excludeRules) {
+    for (const r of excludeRules) enabledRules.delete(r);
+  }
+
+  const threshold = oversizedLines ?? 80;
   const dir = path.resolve(rootDir || process.cwd());
 
   let files = sinceRef ? changedFilesSince(dir, sinceRef) : null;
@@ -272,13 +312,23 @@ export async function scanRepo({ rootDir, sinceRef, maxCandidates } = {}) {
     const isJsTs = /\.(js|jsx|ts|tsx)$/.test(file);
     const isPy = /\.py$/.test(file);
 
-    candidates.push(...checkTodoFixme(file, lines));
-    candidates.push(...checkSecret(file, lines));
-    if (isJsTs) candidates.push(...checkBareExceptJs(file, lines));
-    if (isPy) candidates.push(...checkBareExceptPy(file, lines));
-    if (isJsTs) candidates.push(...checkOversizedFunctionJs(file, lines));
-    if (isPy) candidates.push(...checkOversizedFunctionPy(file, lines));
-    if (isJsTs) candidates.push(...checkUntestedNewFunction(dir, file, content));
+    if (enabledRules.has('todo_fixme') && matchesFileTypes(file, SCAN_RULES.todo_fixme.fileTypes)) {
+      candidates.push(...checkTodoFixme(file, lines));
+    }
+    if (enabledRules.has('secret_like')) {
+      candidates.push(...checkSecret(file, lines));
+    }
+    if (enabledRules.has('bare_except')) {
+      if (isJsTs) candidates.push(...checkBareExceptJs(file, lines));
+      if (isPy) candidates.push(...checkBareExceptPy(file, lines));
+    }
+    if (enabledRules.has('oversized_function')) {
+      if (isJsTs) candidates.push(...checkOversizedFunctionJs(file, lines, threshold));
+      if (isPy) candidates.push(...checkOversizedFunctionPy(file, lines, threshold));
+    }
+    if (enabledRules.has('untested_new_function')) {
+      if (isJsTs) candidates.push(...checkUntestedNewFunction(dir, file, content));
+    }
   }
 
   candidates.sort((a, b) => b.severity_hint - a.severity_hint);

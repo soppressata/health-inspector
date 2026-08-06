@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { scanRepo } from '../src/scan.js';
+import { scanRepo, SCAN_RULES, listRules } from '../src/scan.js';
 
 function git(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -201,4 +201,127 @@ test('falls back to a full scan when sinceRef is invalid and git diff fails', as
 test('rejects an invalid maxCandidates cap', async () => {
   await assert.rejects(() => scanRepo({ rootDir: process.cwd(), maxCandidates: 0 }), /positive integer/);
   await assert.rejects(() => scanRepo({ rootDir: process.cwd(), maxCandidates: 1.5 }), /positive integer/);
+});
+
+test('rejects an invalid oversizedLines threshold', async () => {
+  await assert.rejects(() => scanRepo({ rootDir: process.cwd(), oversizedLines: 0 }), /positive integer/);
+  await assert.rejects(() => scanRepo({ rootDir: process.cwd(), oversizedLines: 1.5 }), /positive integer/);
+});
+
+test('rejects unknown rule names in rules and excludeRules', async () => {
+  await assert.rejects(() => scanRepo({ rootDir: process.cwd(), rules: ['unknown_rule'] }), /unknown/);
+  await assert.rejects(() => scanRepo({ rootDir: process.cwd(), excludeRules: ['unknown_rule'] }), /unknown/);
+});
+
+test('rules option limits which rule types are checked', async () => {
+  const repo = makeRepo();
+  write(path.join(repo, 'src/todo.js'), '// TODO: low priority\n');
+  write(path.join(repo, 'src/secret.js'), 'const api_key = "0123456789abcdef";\n');
+  write(path.join(repo, 'src/catch.js'), 'function f() { try { g() } catch (e) {} }\n');
+  commitAll(repo, 'all violations');
+
+  const result = await scanRepo({ rootDir: repo, sinceRef: null, maxCandidates: 50, rules: ['secret_like'] });
+  assert.equal(result.length, 1);
+  assert.equal(result[0].type, 'secret_like');
+});
+
+test('rules option with multiple rule types', async () => {
+  const repo = makeRepo();
+  write(path.join(repo, 'src/todo.js'), '// TODO: low priority\n');
+  write(path.join(repo, 'src/secret.js'), 'const api_key = "0123456789abcdef";\n');
+  commitAll(repo, 'violations');
+
+  const result = await scanRepo({ rootDir: repo, sinceRef: null, maxCandidates: 50, rules: ['todo_fixme', 'secret_like'] });
+  const types = new Set(result.map((c) => c.type));
+  assert.ok(types.has('todo_fixme'));
+  assert.ok(types.has('secret_like'));
+  assert.equal(types.size, 2);
+});
+
+test('excludeRules removes specific rule types', async () => {
+  const repo = makeRepo();
+  write(path.join(repo, 'src/todo.js'), '// TODO: low priority\n');
+  write(path.join(repo, 'src/secret.js'), 'const api_key = "0123456789abcdef";\n');
+  write(path.join(repo, 'src/catch.js'), 'function f() { try { g() } catch (e) {} }\n');
+  commitAll(repo, 'violations');
+
+  const result = await scanRepo({ rootDir: repo, sinceRef: null, maxCandidates: 50, excludeRules: ['todo_fixme'] });
+  assert.ok(!result.some((c) => c.type === 'todo_fixme'));
+  assert.ok(result.some((c) => c.type === 'secret_like'));
+});
+
+test('oversizedLines threshold is configurable', async () => {
+  const repo = makeRepo();
+  const body = ['export function big() {'];
+  for (let i = 0; i < 85; i++) body.push(`  const v${i} = ${i};`);
+  body.push('}');
+  write(path.join(repo, 'src/big.js'), body.join('\n') + '\n');
+  commitAll(repo, 'big func');
+
+  const highThreshold = await scanRepo({ rootDir: repo, sinceRef: null, maxCandidates: 50, oversizedLines: 100 });
+  assert.ok(!highThreshold.some((c) => c.type === 'oversized_function'), '87-line function under 100-line threshold');
+
+  const lowThreshold = await scanRepo({ rootDir: repo, sinceRef: null, maxCandidates: 50, oversizedLines: 50 });
+  assert.ok(lowThreshold.some((c) => c.type === 'oversized_function'), '87-line function over 50-line threshold');
+});
+
+test('TODO/FIXME does not run on non-source file types', async () => {
+  const repo = makeRepo();
+  write(path.join(repo, 'README.md'), '# TODO: in markdown\n');
+  write(path.join(repo, 'src/code.js'), '// TODO: in javascript\n');
+  commitAll(repo, 'todo files');
+
+  const result = await scanRepo({ rootDir: repo, sinceRef: null, maxCandidates: 50 });
+  const todos = result.filter((c) => c.type === 'todo_fixme');
+  assert.ok(!todos.some((c) => c.file === 'README.md'), 'markdown TODO not scanned');
+  assert.ok(todos.some((c) => c.file === 'src/code.js'), 'javascript TODO scanned');
+});
+
+test('SCAN_RULES export has all 5 rules with correct metadata', async () => {
+  const ruleNames = Object.keys(SCAN_RULES);
+  assert.equal(ruleNames.length, 5);
+  assert.ok(ruleNames.includes('todo_fixme'));
+  assert.ok(ruleNames.includes('secret_like'));
+  assert.ok(ruleNames.includes('bare_except'));
+  assert.ok(ruleNames.includes('untested_new_function'));
+  assert.ok(ruleNames.includes('oversized_function'));
+
+  assert.equal(SCAN_RULES.todo_fixme.severityHint, 1);
+  assert.equal(SCAN_RULES.secret_like.severityHint, 5);
+  assert.equal(SCAN_RULES.bare_except.severityHint, 4);
+  assert.equal(SCAN_RULES.untested_new_function.severityHint, 3);
+  assert.equal(SCAN_RULES.oversized_function.severityHint, 2);
+
+  for (const [name, meta] of Object.entries(SCAN_RULES)) {
+    assert.ok(typeof meta.description === 'string' && meta.description.length > 0, `${name} has description`);
+    assert.ok(Array.isArray(meta.fileTypes), `${name} has fileTypes array`);
+  }
+  assert.ok(SCAN_RULES.secret_like.fileTypes.length === 0, 'secret_like runs on all files');
+  assert.ok(SCAN_RULES.todo_fixme.fileTypes.includes('js'), 'todo_fixme covers js');
+});
+
+test('listRules returns the correct set of rule names', async () => {
+  const rules = listRules();
+  assert.equal(rules.length, 5);
+  assert.deepEqual(
+    [...rules].sort(),
+    ['bare_except', 'oversized_function', 'secret_like', 'todo_fixme', 'untested_new_function'],
+  );
+});
+
+test('backward compatibility: scanRepo without new options behaves as before', async () => {
+  const repo = makeRepo();
+  write(path.join(repo, 'src/base.js'), '// TODO: pre-existing\n');
+  commitAll(repo, 'baseline');
+  const base = git(repo, ['rev-parse', 'HEAD']).trim();
+
+  write(path.join(repo, 'src/work.js'), '// TODO: new change\nconst api_key = "0123456789abcdef";\nfunction f() { try { g() } catch (e) {} }\n');
+  commitAll(repo, 'add work');
+
+  const result = await scanRepo({ rootDir: repo, sinceRef: base, maxCandidates: 50 });
+  assert.ok(result.length > 0);
+  assert.ok(result.some((c) => c.type === 'todo_fixme'));
+  assert.ok(result.some((c) => c.type === 'secret_like'));
+  assert.ok(result.some((c) => c.type === 'bare_except'));
+  assert.ok(!result.some((c) => c.file === 'src/base.js'));
 });
