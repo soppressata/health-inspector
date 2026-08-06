@@ -48,13 +48,17 @@ const external_node_url_namespaceObject = __WEBPACK_EXTERNAL_createRequire(impor
 
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist']);
 
-const SEVERITY_HINT = {
-  secret_like: 5,
-  bare_except: 4,
-  untested_new_function: 3,
-  oversized_function: 2,
-  todo_fixme: 1,
+const SCAN_RULES = {
+  todo_fixme: { severityHint: 1, description: 'TODO or FIXME comment found', fileTypes: ['js', 'jsx', 'ts', 'tsx', 'py', 'go', 'rb', 'rs', 'c', 'cpp', 'h', 'hpp'] },
+  secret_like: { severityHint: 5, description: 'Potential secret or credential', fileTypes: [] },
+  bare_except: { severityHint: 4, description: 'Bare or empty catch block', fileTypes: ['js', 'jsx', 'ts', 'tsx', 'py'] },
+  untested_new_function: { severityHint: 3, description: 'New exported function has no test reference', fileTypes: ['js', 'jsx', 'ts', 'tsx'] },
+  oversized_function: { severityHint: 2, description: 'Function exceeds line threshold', fileTypes: ['js', 'jsx', 'ts', 'tsx', 'py'] },
 };
+
+const SEVERITY_HINT = Object.fromEntries(
+  Object.entries(SCAN_RULES).map(([k, v]) => [k, v.severityHint])
+);
 
 const SECRET_PATTERNS = [
   /AKIA[0-9A-Z]{16}/,
@@ -74,6 +78,12 @@ function candidate(type, file, line, snippet) {
 
 function isIgnored(file) {
   return file.split(/[\\/]/).some((seg) => IGNORE_DIRS.has(seg));
+}
+
+function matchesFileTypes(file, fileTypes) {
+  if (!fileTypes || fileTypes.length === 0) return true;
+  const ext = external_node_path_namespaceObject.extname(file).slice(1);
+  return fileTypes.includes(ext);
 }
 
 function lineNumberAt(text, index) {
@@ -205,7 +215,7 @@ function checkBareExceptPy(file, lines) {
   return out;
 }
 
-function checkOversizedFunctionJs(file, lines) {
+function checkOversizedFunctionJs(file, lines, threshold = 80) {
   const out = [];
   const text = lines.join('\n');
   for (const m of text.matchAll(JS_FUNC_RE)) {
@@ -241,14 +251,14 @@ function checkOversizedFunctionJs(file, lines) {
     if (endLine === -1) continue;
 
     const span = endLine - startLine + 1;
-    if (span > 80) {
+    if (span > threshold) {
       out.push(candidate('oversized_function', file, startLine, (lines[startLine - 1] || '').trim()));
     }
   }
   return out;
 }
 
-function checkOversizedFunctionPy(file, lines) {
+function checkOversizedFunctionPy(file, lines, threshold = 80) {
   const out = [];
   const defRe = /^\s*def\s+[\w$]+\s*\(/;
   lines.forEach((line, i) => {
@@ -264,7 +274,7 @@ function checkOversizedFunctionPy(file, lines) {
       if (l.length - l.trimStart().length <= indent) break;
       end = j;
     }
-    if (end - i + 1 > 80) {
+    if (end - i + 1 > threshold) {
       out.push(candidate('oversized_function', file, i + 1, line.trim()));
     }
   });
@@ -297,10 +307,40 @@ function checkUntestedNewFunction(rootDir, file, content) {
   return [candidate('untested_new_function', file, exportLine + 1, (lines[exportLine] || '').trim())];
 }
 
-async function scanRepo({ rootDir, sinceRef, maxCandidates } = {}) {
+function listRules() {
+  return Object.keys(SCAN_RULES);
+}
+
+function validateRuleNames(names, optionName) {
+  if (names === undefined) return;
+  if (!Array.isArray(names)) {
+    throw new TypeError(`scanRepo: ${optionName} must be an array`);
+  }
+  for (const name of names) {
+    if (!Object.prototype.hasOwnProperty.call(SCAN_RULES, name)) {
+      throw new TypeError(`scanRepo: ${optionName} contains unknown rule name: ${name}`);
+    }
+  }
+}
+
+async function scanRepo({ rootDir, sinceRef, maxCandidates, oversizedLines, rules, excludeRules } = {}) {
   if (maxCandidates !== undefined && (!Number.isInteger(maxCandidates) || maxCandidates <= 0)) {
     throw new TypeError('scanRepo: maxCandidates must be a positive integer');
   }
+  if (oversizedLines !== undefined && (!Number.isInteger(oversizedLines) || oversizedLines <= 0)) {
+    throw new TypeError('scanRepo: oversizedLines must be a positive integer');
+  }
+
+  validateRuleNames(rules, 'rules');
+  validateRuleNames(excludeRules, 'excludeRules');
+
+  const ruleNames = listRules();
+  const enabledRules = new Set(rules && rules.length > 0 ? rules : ruleNames);
+  if (excludeRules) {
+    for (const r of excludeRules) enabledRules.delete(r);
+  }
+
+  const threshold = oversizedLines ?? 80;
   const dir = external_node_path_namespaceObject.resolve(rootDir || process.cwd());
 
   let files = sinceRef ? changedFilesSince(dir, sinceRef) : null;
@@ -316,13 +356,23 @@ async function scanRepo({ rootDir, sinceRef, maxCandidates } = {}) {
     const isJsTs = /\.(js|jsx|ts|tsx)$/.test(file);
     const isPy = /\.py$/.test(file);
 
-    candidates.push(...checkTodoFixme(file, lines));
-    candidates.push(...checkSecret(file, lines));
-    if (isJsTs) candidates.push(...checkBareExceptJs(file, lines));
-    if (isPy) candidates.push(...checkBareExceptPy(file, lines));
-    if (isJsTs) candidates.push(...checkOversizedFunctionJs(file, lines));
-    if (isPy) candidates.push(...checkOversizedFunctionPy(file, lines));
-    if (isJsTs) candidates.push(...checkUntestedNewFunction(dir, file, content));
+    if (enabledRules.has('todo_fixme') && matchesFileTypes(file, SCAN_RULES.todo_fixme.fileTypes)) {
+      candidates.push(...checkTodoFixme(file, lines));
+    }
+    if (enabledRules.has('secret_like')) {
+      candidates.push(...checkSecret(file, lines));
+    }
+    if (enabledRules.has('bare_except')) {
+      if (isJsTs) candidates.push(...checkBareExceptJs(file, lines));
+      if (isPy) candidates.push(...checkBareExceptPy(file, lines));
+    }
+    if (enabledRules.has('oversized_function')) {
+      if (isJsTs) candidates.push(...checkOversizedFunctionJs(file, lines, threshold));
+      if (isPy) candidates.push(...checkOversizedFunctionPy(file, lines, threshold));
+    }
+    if (enabledRules.has('untested_new_function')) {
+      if (isJsTs) candidates.push(...checkUntestedNewFunction(dir, file, content));
+    }
   }
 
   candidates.sort((a, b) => b.severity_hint - a.severity_hint);
@@ -643,14 +693,38 @@ async function saveState({ octokitLike, owner, repo, stateBranch, state }) {
 const API_BASE = 'https://api.github.com';
 
 /**
+ * Classify an HTTP status as retryable.
+ * Retryable: 408, 425, 429, and any 5xx (500-599).
+ * Everything else is considered permanent.
+ * @param {number} status
+ * @returns {boolean}
+ */
+function isRetryable(status) {
+  if (status === 408 || status === 425 || status === 429) return true;
+  return status >= 500 && status <= 599;
+}
+
+/**
  * Thin GitHub REST client implemented with plain fetch(). Produces the same
  * shape the rest of the code already expects:
  *   getContent({ owner, repo, path, ref }) -> { content, sha } or throws { status: 404 }
  *   createOrUpdateFile({ owner, repo, path, message, content, branch, sha }) -> raw body
  *   createIssue({ owner, repo, title, body, labels }) -> raw body ({ html_url, number, ... })
  * @param {string} token
+ * @param {object} [options]
+ * @param {number} [options.timeoutMs=10000] per-request abort timeout
+ * @param {number} [options.maxRetries=3] number of retry attempts for retryable failures
+ * @param {number} [options.retryBaseMs=200] base for exponential backoff
+ * @param {Function} [options.fetchImpl=fetch] injectable fetch for tests
  */
-function makeGithubClient(token) {
+function makeGithubClient(token, options = {}) {
+  const {
+    timeoutMs = 10000,
+    maxRetries = 3,
+    retryBaseMs = 200,
+    fetchImpl = fetch,
+  } = options;
+
   const baseHeaders = {
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
@@ -658,29 +732,67 @@ function makeGithubClient(token) {
   };
 
   async function request(method, urlPath, body) {
-    const response = await fetch(`${API_BASE}${urlPath}`, {
-      method,
-      headers: {
-        ...baseHeaders,
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    if (!response.ok) {
-      let detail = '';
+    let lastErr;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      let response;
       try {
-        detail = (await response.text()).slice(0, 300);
-      } catch {
-        // keep the empty detail
+        response = await fetchImpl(`${API_BASE}${urlPath}`, {
+          method,
+          headers: {
+            ...baseHeaders,
+            ...(body ? { 'Content-Type': 'application/json' } : {}),
+          },
+          body: body ? JSON.stringify(body) : undefined,
+          signal: controller.signal,
+        });
+      } catch (err) {
+        // Network error (incl. abort from timeout): retry if attempts remain, else throw
+        if (attempt < maxRetries) {
+          lastErr = err;
+          const backoff = Math.min(retryBaseMs * 2 ** attempt, 5000);
+          await delay(backoff);
+          continue;
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
       }
-      const err = new Error(`GitHub API HTTP ${response.status} ${detail}`);
-      err.status = response.status;
+
+      // A response was received — classify by status.
+      if (response.ok) {
+        if (response.status === 204) return null;
+        return response.json();
+      }
+
+      const err = await buildApiError(response);
+      if (isRetryable(response.status) && attempt < maxRetries) {
+        lastErr = err;
+        const backoff = Math.min(retryBaseMs * 2 ** attempt, 5000);
+        await delay(backoff);
+        continue;
+      }
+      // Permanent error (or out of retries): throw immediately, do not retry.
       throw err;
     }
+    throw lastErr;
+  }
 
-    if (response.status === 204) return null;
-    return response.json();
+  async function buildApiError(response) {
+    let detail = '';
+    try {
+      detail = (await response.text()).slice(0, 300);
+    } catch {
+      // keep the empty detail
+    }
+    const err = new Error(`GitHub API HTTP ${response.status} ${detail}`);
+    err.status = response.status;
+    return err;
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   return {
@@ -736,7 +848,127 @@ async function fileReport({ octokitLike, owner, repo, label, reportMarkdown, fin
   return { filed: true, issueUrl: issue.html_url, newFindings, updatedState: state };
 }
 
+;// CONCATENATED MODULE: ./src/local-state.js
+
+
+
+
+
+
+
+const REPLAY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+const DEFAULT_LOCAL_STATE = {
+  lastScannedRef: null,
+  filedFingerprints: [],
+  deliveries: [],
+  rules: {},
+};
+
+
+
+function freshDefault() {
+  return {
+    lastScannedRef: null,
+    filedFingerprints: [],
+    deliveries: [],
+    rules: {},
+  };
+}
+
+function normalizeState(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const ref = parsed.lastScannedRef;
+  return {
+    lastScannedRef: ref === null || typeof ref === 'string' ? ref : null,
+    filedFingerprints: Array.isArray(parsed.filedFingerprints)
+      ? parsed.filedFingerprints.map((f) => String(f))
+      : [],
+    deliveries: Array.isArray(parsed.deliveries) ? parsed.deliveries : [],
+    rules: parsed.rules && typeof parsed.rules === 'object' && !Array.isArray(parsed.rules)
+      ? parsed.rules
+      : {},
+  };
+}
+
+function loadLocalState(filePath) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const normalized = normalizeState(parsed);
+    return normalized || freshDefault();
+  } catch (err) {
+    if (err && (err.code === 'ENOENT' || err instanceof SyntaxError)) return freshDefault();
+    throw err;
+  }
+}
+
+function saveLocalState(filePath, state) {
+  const resolved = path.resolve(filePath);
+  const dir = path.dirname(resolved);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    // directory may already exist
+  }
+  const tmp = `${resolved}.${randomBytes(6).toString('hex')}.tmp`;
+  const data = JSON.stringify(state, null, 2);
+  let fd;
+  try {
+    fd = fs.openSync(tmp, 'w');
+    fs.writeSync(fd, Buffer.from(data, 'utf8'));
+    fs.fsyncSync(fd);
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // ignore close errors
+      }
+    }
+  }
+  try {
+    fs.renameSync(tmp, resolved);
+  } catch (err) {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      // ignore cleanup errors
+    }
+    throw err;
+  }
+  return state;
+}
+
+function payloadHash(payload) {
+  return (0,external_node_crypto_namespaceObject.createHash)('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
+function deliveryIdFor(payload) {
+  if (payload && typeof payload === 'object' && payload.delivery_id) {
+    return payload.delivery_id;
+  }
+  return makeDeliveryId(payload);
+}
+
+function recordDelivery(state, payload) {
+  const id = deliveryIdFor(payload);
+  const entry = { id, timestamp: Date.now(), payloadHash: payloadHash(payload) };
+  return { ...state, deliveries: [...(state?.deliveries || []), entry] };
+}
+
+function wasDelivered(state, payload, now = Date.now()) {
+  const id = deliveryIdFor(payload);
+  return Array.isArray(state?.deliveries) && state.deliveries.some(
+    (d) => d && d.id === id && typeof d.timestamp === 'number' && now - d.timestamp <= REPLAY_WINDOW_MS,
+  );
+}
+
 ;// CONCATENATED MODULE: ./src/webhook.js
+
+
+
+
 
 
 const TRANSIENT = new Set([408, 425, 429]);
@@ -769,25 +1001,90 @@ function buildWebhookPayload({ repository, ref, findings = [], reportUrl = null,
   };
 }
 
-async function sendWebhook(url, payload, { headers = {}, secret, secretHeader = 'X-Health-Inspector-Secret', timeoutMs = 5000, retries = 3, fetchImpl = fetch } = {}) {
+function signPayload(payload, secret) {
+  return (0,external_node_crypto_namespaceObject.createHmac)('sha256', secret).update(JSON.stringify(payload)).digest('hex');
+}
+
+function verifySignature(payload, secret, signature) {
+  if (typeof signature !== 'string') return false;
+  const expected = signPayload(payload, secret);
+  const expectedBuf = Buffer.from(expected, 'hex');
+  const actualBuf = Buffer.from(signature, 'hex');
+  if (expectedBuf.length !== actualBuf.length) return false;
+  return timingSafeEqual(expectedBuf, actualBuf);
+}
+
+async function sendWebhook(url, payload, {
+  headers = {}, secret, secretHeader = 'X-Health-Inspector-Secret', timeoutMs = 5000,
+  retries = 3, fetchImpl = fetch, signingSecret, signatureHeader = 'X-Health-Inspector-Signature',
+  state, outboxDir, drainPrevious = false,
+} = {}) {
   const custom = validateHeaders(headers);
   if (secret !== undefined) { if (!secretHeader || /[\r\n]/.test(secretHeader)) throw new TypeError('invalid webhook secret header'); custom[secretHeader] = String(secret); }
   const delivery = payload.delivery_id || makeDeliveryId(payload);
+  if (signingSecret !== undefined) {
+    if (!signatureHeader || /[\r\n]/.test(signatureHeader)) throw new TypeError('invalid webhook signature header');
+    custom[signatureHeader] = `sha256=${signPayload(payload, signingSecret)}`;
+  }
+  if (state !== undefined && state !== null) {
+    if (wasDelivered(state, payload)) {
+      return { delivered: false, skipped: true, reason: 'replay', deliveryId: delivery };
+    }
+  }
+  if (drainPrevious && outboxDir) {
+    const outgoingOptions = { url, headers, secret, secretHeader, timeoutMs, retries, fetchImpl, signingSecret, signatureHeader, state };
+    await drainOutbox(outboxDir, outgoingOptions);
+  }
   const attempts = Math.max(1, Number(retries) + 1);
+  let result;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
     try {
       const response = await fetchImpl(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...custom, 'X-Health-Inspector-Delivery': delivery }, body: JSON.stringify(payload), signal: controller.signal });
-      if (response.ok) return { delivered: true, attempts: attempt + 1, deliveryId: delivery };
+      if (response.ok) { result = { delivered: true, attempts: attempt + 1, deliveryId: delivery }; break; }
       const retryable = TRANSIENT.has(response.status) || response.status >= 500;
-      if (!retryable || attempt + 1 === attempts) return { delivered: false, attempts: attempt + 1, status: response.status, error: `HTTP ${response.status}` };
+      if (!retryable || attempt + 1 === attempts) { result = { delivered: false, attempts: attempt + 1, status: response.status, error: `HTTP ${response.status}` }; break; }
     } catch (error) {
-      if (attempt + 1 === attempts) return { delivered: false, attempts: attempt + 1, error: redactSensitive(error.message) };
+      if (attempt + 1 === attempts) { result = { delivered: false, attempts: attempt + 1, error: redactSensitive(error.message) }; break; }
     } finally { clearTimeout(timer); }
     await new Promise((resolve) => setTimeout(resolve, Math.min(1000, 100 * 2 ** attempt)));
   }
-  return { delivered: false, attempts };
+  if (!result) result = { delivered: false, attempts };
+  if (result.delivered) {
+    if (state !== undefined && state !== null) {
+      return { ...result, updatedState: recordDelivery(state, payload) };
+    }
+    return result;
+  }
+  if (outboxDir) {
+    external_node_fs_namespaceObject.mkdirSync(outboxDir, { recursive: true });
+    external_node_fs_namespaceObject.writeFileSync(external_node_path_namespaceObject.join(outboxDir, `${delivery}.json`), JSON.stringify(payload), 'utf8');
+  }
+  return result;
+}
+
+async function drainOutbox(outboxDir, sendOpts = {}) {
+  if (!external_node_fs_namespaceObject.existsSync(outboxDir)) return { delivered: 0, failed: 0, remaining: 0 };
+  const { url, ...rest } = sendOpts;
+  const files = external_node_fs_namespaceObject.readdirSync(outboxDir).filter((f) => f.endsWith('.json'));
+  let delivered = 0;
+  let failed = 0;
+  for (const file of files) {
+    const fullPath = external_node_path_namespaceObject.join(outboxDir, file);
+    const payload = JSON.parse(external_node_fs_namespaceObject.readFileSync(fullPath, 'utf8'));
+    const result = await sendWebhook(url, payload, { ...rest, outboxDir: undefined, drainPrevious: false });
+    if (result.delivered) {
+      external_node_fs_namespaceObject.unlinkSync(fullPath);
+      delivered += 1;
+    } else if (result.skipped) {
+      external_node_fs_namespaceObject.unlinkSync(fullPath);
+    } else {
+      failed += 1;
+    }
+  }
+  const remaining = external_node_fs_namespaceObject.existsSync(outboxDir) ? external_node_fs_namespaceObject.readdirSync(outboxDir).filter((f) => f.endsWith('.json')).length : 0;
+  return { delivered, failed, remaining };
 }
 
 async function notifyWebhook(options) {

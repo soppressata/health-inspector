@@ -3,14 +3,15 @@
   "version": "0.1.0",
   "description": "A GitHub Action that audits your repo and files a report only when it finds real violations.",
   "type": "module",
-  "private": true,
+  "private": false,
   "main": "src/index.js",
   "bin": {
     "health-inspector": "bin/health-inspector.js"
   },
   "scripts": {
     "build": "ncc build src/index.js -o dist",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "prepare": "npm run build"
   },
   "license": "MIT",
   "devDependencies": {

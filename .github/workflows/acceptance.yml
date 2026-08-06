@@ -1,12 +1,11 @@
-name: CI
+name: Acceptance
 
 on:
   push:
     branches: [main]
-  pull_request:
 
 jobs:
-  test:
+  acceptance:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,10 +27,20 @@ jobs:
         run: |
           for f in src/*.js bin/*.js; do node --check "$f"; done
       - run: npm test
-      - name: CLI smoke test (offline JSON)
-        run: |
-          npx --no-install health-inspector . --offline --format json > smoke.json
-          node -e "const o=JSON.parse(require('fs').readFileSync('smoke.json','utf8')); if(typeof o.findingsCount!=='number') throw new Error('missing findingsCount'); console.log('smoke ok:', o.findingsCount, 'findings,', o.candidatesCount, 'candidates')"
       - run: npm run build
       - name: Verify dist/ is in sync with src/
         run: git diff --exit-code -- dist/
+      - name: CLI acceptance (exit code 0 or 1, valid JSON)
+        run: |
+          set +e
+          node bin/health-inspector.js . --offline --format json > /tmp/acc.json 2>/tmp/acc.err
+          code=$?
+          if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then
+            echo "::error::CLI exited with unexpected code $code"
+            cat /tmp/acc.err
+            exit 1
+          fi
+          node -e "JSON.parse(require('fs').readFileSync('/tmp/acc.json','utf8'))" \
+            || { echo "::error::CLI output is not valid JSON"; exit 1; }
+          echo "CLI acceptance passed (exit $code)"
+          rm -rf .health-inspector

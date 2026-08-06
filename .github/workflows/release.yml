@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Create GitHub Release (from CHANGELOG.md)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" --title "$tag" --notes-file CHANGELOG.md --verify-tag
+      - name: Promote v1 major tag to released commit
+        # GITHUB_TOKEN pushes are not re-processed by Actions, so this does not
+        # re-trigger this workflow (which only matches v* tags).
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git tag -f v1
+          git push --force origin v1

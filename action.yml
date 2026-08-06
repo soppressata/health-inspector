@@ -22,6 +22,10 @@ inputs:
     description: 'Glob or directory to scan.'
     required: false
     default: '.'
+  scan-paths:
+    description: 'Space-separated list of paths to scan (defaults to paths input).'
+    required: false
+    default: '.'
   max-candidates:
     description: 'Maximum number of scan candidates to pass to the model.'
     required: false
@@ -38,6 +42,14 @@ inputs:
     description: 'GitHub token used to authenticate REST API calls.'
     required: false
     default: ${{ github.token }}
+  github-request-timeout-ms:
+    description: 'Per-request timeout (ms) for GitHub REST API calls.'
+    required: false
+    default: '15000'
+  github-max-retries:
+    description: 'Maximum number of retries for transient GitHub API failures.'
+    required: false
+    default: '3'
   webhook-url:
     description: 'Optional HTTPS endpoint to notify when new findings are reported.'
     required: false
@@ -59,6 +71,13 @@ inputs:
     description: 'Number of retries for transient webhook failures.'
     required: false
     default: '3'
+  webhook-signing-secret:
+    description: 'Optional HMAC-SHA256 signing secret for webhook payloads.'
+    required: false
+  webhook-signature-header:
+    description: 'Header name used to deliver the HMAC-SHA256 webhook signature.'
+    required: false
+    default: 'X-Health-Inspector-Signature'
 
 outputs:
   findings-count:
@@ -67,6 +86,8 @@ outputs:
     description: 'URL of the filed issue report, if any.'
   webhook-delivered:
     description: 'Whether a findings webhook was delivered.'
+  webhook-delivery-id:
+    description: 'Delivery ID for the fired findings webhook (empty if no webhook was sent).'
 
 runs:
   using: node20
