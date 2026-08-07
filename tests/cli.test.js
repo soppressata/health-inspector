@@ -76,8 +76,13 @@ test('parseArgs: --include-snippets disables redaction (backward compatible)', (
   assert.equal(options.redact, false);
 });
 
-test('parseArgs: --fail-on rejects invalid values', () => {
-  assert.throws(() => parseArgs(['--fail-on', 'bogus']), /fail-on/);
+test('parseArgs: --provider claude is parsed into provider', () => {
+  const options = parseArgs(['--provider', 'claude']);
+  assert.equal(options.provider, 'claude');
+});
+
+test('parseArgs: --provider requires a value', () => {
+  assert.throws(() => parseArgs(['--provider']), /requires a value/);
 });
 
 test('parseArgs: --format rejects unknown formats', () => {

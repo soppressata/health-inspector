@@ -256,6 +256,14 @@ test('buildGithubClientOptions defaults to 15000ms and 3 retries', () => {
   assert.equal(opts.maxRetries, 3);
 });
 
+test('buildActionConfig reads INPUT_PROVIDER', () => {
+  const dir = tmpDir();
+  withEnv({ 'INPUT_PROVIDER': 'kimi' }, () => {
+    const config = buildActionConfig(dir);
+    assert.equal(config.provider, 'kimi');
+  });
+});
+
 test('buildActionConfig parses INPUT_SCAN-PATHS into array', () => {
   const dir = tmpDir();
   withEnv({ 'INPUT_SCAN-PATHS': 'src tests' }, () => {

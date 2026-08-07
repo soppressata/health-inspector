@@ -62,6 +62,7 @@ export async function runInspection(options = {}) {
     apiKey: options.apiKey,
     baseUrl: options.baseUrl || 'https://api.deepseek.com',
     model: options.model || 'deepseek-chat',
+    provider: options.provider || 'openai',
   });
 
   return { ...result, ...inspected };

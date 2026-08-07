@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const DEFAULT_CONFIG = {
+  provider: 'openai',
   baseUrl: 'https://api.deepseek.com',
   model: 'deepseek-chat',
   apiKey: undefined,
@@ -47,6 +48,7 @@ export function loadConfigFile(cwd) {
 
 const ENV_MAP = [
   ['HEALTH_INSPECTOR_API_KEY', 'apiKey', (v) => v],
+  ['HEALTH_INSPECTOR_PROVIDER', 'provider', (v) => v],
   ['HEALTH_INSPECTOR_BASE_URL', 'baseUrl', (v) => v],
   ['HEALTH_INSPECTOR_MODEL', 'model', (v) => v],
   ['HEALTH_INSPECTOR_MAX_CANDIDATES', 'maxCandidates', (v) => Number.parseInt(v, 10)],
@@ -116,6 +118,12 @@ export function validateConfig(config) {
       throw new Error(`failOn must be one of none|low|medium|high|all, got ${config.failOn}`);
     }
   }
+  if (config.provider !== undefined) {
+    const validProviders = new Set(['openai', 'claude', 'anthropic', 'kimi', 'moonshot', 'hermes', 'opencode']);
+    if (!validProviders.has(config.provider)) {
+      throw new Error(`provider must be one of openai|claude|anthropic|kimi|moonshot|hermes|opencode, got ${config.provider}`);
+    }
+  }
   if (config.rules !== undefined && config.rules !== null) {
     if (!Array.isArray(config.rules)) {
       throw new Error(`rules must be an array, got ${typeof config.rules}`);
@@ -144,4 +152,23 @@ export function resolveConfig({ flags, env, fileConfig, defaults } = {}) {
   defineFrom(out, flags);
   validateConfig(out);
   return out;
+}
+
+const PROVIDER_DEFAULTS = {
+  claude: { baseUrl: 'https://api.anthropic.com', model: 'claude-haiku-4-5' },
+  anthropic: { baseUrl: 'https://api.anthropic.com', model: 'claude-haiku-4-5' },
+  kimi: { baseUrl: 'https://api.moonshot.ai/v1', model: 'kimi-k2.5' },
+  moonshot: { baseUrl: 'https://api.moonshot.ai/v1', model: 'kimi-k2.5' },
+  hermes: { baseUrl: 'https://openrouter.ai/api/v1', model: 'nousresearch/hermes-3-llama-3.1-70b' },
+  opencode: { baseUrl: 'http://127.0.0.1:4096' },
+};
+
+export function applyProviderDefaults(config) {
+  if (!config || typeof config !== 'object') return config;
+  const provider = config.provider || 'openai';
+  const defaults = PROVIDER_DEFAULTS[provider];
+  if (!defaults) return config;
+  if (!config.baseUrl || config.baseUrl === DEFAULT_CONFIG.baseUrl) config.baseUrl = defaults.baseUrl;
+  if (defaults.model && (!config.model || config.model === DEFAULT_CONFIG.model)) config.model = defaults.model;
+  return config;
 }

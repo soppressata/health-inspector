@@ -4,7 +4,7 @@
 
 ### Added
 
-### Changed
+- **Multi-provider support:** `provider` config key, `--provider` CLI flag, `provider` Action input, and `HEALTH_INSPECTOR_PROVIDER` env var. Supported providers: `openai`, `claude`, `kimi`, `hermes`, `opencode` (`anthropic` and `moonshot` are accepted as aliases). `applyProviderDefaults` applies per-provider `baseUrl`/`model` defaults when the user does not set them explicitly.
 
 ### Fixed
 

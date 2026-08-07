@@ -6,6 +6,10 @@ inputs:
   api-key:
     description: 'LLM API key (e.g. DeepSeek).'
     required: true
+  provider:
+    description: 'LLM provider: openai (default), claude, kimi, hermes, opencode.'
+    required: false
+    default: 'openai'
   base-url:
     description: 'Base URL of the OpenAI-compatible chat completions API.'
     required: false

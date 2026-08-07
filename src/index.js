@@ -8,7 +8,7 @@ import { inspectCandidates } from './inspect.js';
 import { loadState, saveState } from './state.js';
 import { fileReport, makeGithubClient } from './github.js';
 import { notifyWebhook } from './webhook.js';
-import { resolveConfig, loadConfigFile } from './config.js';
+import { resolveConfig, loadConfigFile, applyProviderDefaults } from './config.js';
 
 /**
  * Read a GitHub Actions input from the environment. Input names are mapped
@@ -90,6 +90,7 @@ export function buildActionConfig(rootDir) {
   const webhookHeadersInput = input('webhook-headers');
   const flags = {
     apiKey: input('api-key'),
+    provider: input('provider'),
     baseUrl: input('base-url'),
     model: input('model'),
     maxCandidates: intInput('max-candidates'),
@@ -134,6 +135,7 @@ export function buildGithubClientOptions() {
 export async function main() {
   const rootDir = path.resolve(input('paths') || '.');
   const config = buildActionConfig(rootDir);
+  applyProviderDefaults(config);
   const { owner, repo } = parseOwnerRepo(process.env.GITHUB_REPOSITORY);
 
   if (!config.apiKey) throw new Error('Missing required input: api-key');
@@ -178,6 +180,7 @@ export async function main() {
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
     model: config.model,
+    provider: config.provider || 'openai',
   });
   const state = { ...loaded, lastScannedRef: currentRef };
   const result = await fileReport({

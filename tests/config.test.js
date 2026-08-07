@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-import { DEFAULT_CONFIG, loadConfigFile, resolveConfig, envToConfig, validateConfig } from '../src/config.js';
+import { DEFAULT_CONFIG, loadConfigFile, resolveConfig, envToConfig, validateConfig, applyProviderDefaults } from '../src/config.js';
 
 test('DEFAULT_CONFIG has the documented defaults', () => {
   assert.equal(DEFAULT_CONFIG.baseUrl, 'https://api.deepseek.com');
@@ -207,4 +207,69 @@ test('validateConfig rejects a non-object config', () => {
 test('envToConfig returns {} for no env', () => {
   assert.deepEqual(envToConfig({}), {});
   assert.deepEqual(envToConfig(), {});
+});
+
+test('envToConfig maps HEALTH_INSPECTOR_PROVIDER to provider', () => {
+  assert.equal(envToConfig({ HEALTH_INSPECTOR_PROVIDER: 'claude' }).provider, 'claude');
+});
+
+test('validateConfig accepts valid providers', () => {
+  for (const p of ['openai', 'claude', 'anthropic', 'kimi', 'moonshot', 'hermes', 'opencode']) {
+    assert.doesNotThrow(() => validateConfig({ ...DEFAULT_CONFIG, provider: p }));
+  }
+});
+
+test('validateConfig rejects invalid provider', () => {
+  assert.throws(() => validateConfig({ ...DEFAULT_CONFIG, provider: 'bogus' }), /provider/);
+});
+
+test('DEFAULT_CONFIG.provider is openai', () => {
+  assert.equal(DEFAULT_CONFIG.provider, 'openai');
+});
+
+test('applyProviderDefaults sets anthropic baseUrl and model for claude', () => {
+  const cfg = applyProviderDefaults({ provider: 'claude' });
+  assert.equal(cfg.baseUrl, 'https://api.anthropic.com');
+  assert.equal(cfg.model, 'claude-haiku-4-5');
+});
+
+test('applyProviderDefaults sets anthropic baseUrl and model for anthropic alias', () => {
+  const cfg = applyProviderDefaults({ provider: 'anthropic' });
+  assert.equal(cfg.baseUrl, 'https://api.anthropic.com');
+  assert.equal(cfg.model, 'claude-haiku-4-5');
+});
+
+test('applyProviderDefaults sets kimi baseUrl and model', () => {
+  const cfg = applyProviderDefaults({ provider: 'kimi' });
+  assert.equal(cfg.baseUrl, 'https://api.moonshot.ai/v1');
+  assert.equal(cfg.model, 'kimi-k2.5');
+});
+
+test('applyProviderDefaults sets hermes baseUrl and model', () => {
+  const cfg = applyProviderDefaults({ provider: 'hermes' });
+  assert.equal(cfg.baseUrl, 'https://openrouter.ai/api/v1');
+  assert.equal(cfg.model, 'nousresearch/hermes-3-llama-3.1-70b');
+});
+
+test('applyProviderDefaults sets opencode baseUrl without model', () => {
+  const cfg = applyProviderDefaults({ provider: 'opencode' });
+  assert.equal(cfg.baseUrl, 'http://127.0.0.1:4096');
+  assert.equal(cfg.model, undefined);
+});
+
+test('applyProviderDefaults leaves config without baseUrl/model for openai without setting them', () => {
+  const cfg = applyProviderDefaults({ provider: 'openai' });
+  assert.equal(cfg.provider, 'openai');
+});
+
+test('applyProviderDefaults: when openai config already has deepseek defaults, they remain', () => {
+  const cfg = applyProviderDefaults({ provider: 'openai', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' });
+  assert.equal(cfg.baseUrl, 'https://api.deepseek.com');
+  assert.equal(cfg.model, 'deepseek-chat');
+});
+
+test('applyProviderDefaults does not override user-set baseUrl/model', () => {
+  const cfg = applyProviderDefaults({ provider: 'claude', baseUrl: 'https://custom.example.com', model: 'my-model' });
+  assert.equal(cfg.baseUrl, 'https://custom.example.com');
+  assert.equal(cfg.model, 'my-model');
 });

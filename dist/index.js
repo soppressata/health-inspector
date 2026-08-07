@@ -382,7 +382,7 @@ async function scanRepo({ rootDir, sinceRef, maxCandidates, oversizedLines, rule
   return candidates.slice(0, cap);
 }
 
-;// CONCATENATED MODULE: ./src/inspect.js
+;// CONCATENATED MODULE: ./src/providers/shared.js
 const VALID_SEVERITIES = new Set(['low', 'medium', 'high']);
 const DEFAULT_MAX_OUTPUT_TOKENS = 1000;
 
@@ -477,34 +477,63 @@ function buildReport(findings, summaryMarkdown) {
   return out.join('\n').trim();
 }
 
-async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutputTokens, timeoutMs = 30000 } = {}) {
-  const list = Array.isArray(candidates) ? candidates.map(redactCandidate) : [];
-  if (list.length === 0) {
-    return { findings: [], reportMarkdown: null, tokensUsed: 0 };
+function mapModelFindings(list, parsed) {
+  if (!parsed || !Array.isArray(parsed.findings)) {
+    return [];
   }
-  if (!apiKey) throw new Error('inspectCandidates: apiKey is required');
-  if (!baseUrl) throw new Error('inspectCandidates: baseUrl is required');
-  if (!model) throw new Error('inspectCandidates: model is required');
+  const findings = [];
+  for (const f of parsed.findings) {
+    if (!f || typeof f !== 'object' || Array.isArray(f)) continue;
+    if (f.confirmed !== true) continue;
+    const index = Number(f.index);
+    const candidate = list[index - 1];
+    if (!candidate) continue;
+    findings.push({
+      ...candidate,
+      confirmed: true,
+      severity: VALID_SEVERITIES.has(f.severity) ? f.severity : 'medium',
+      reason: String(f.reason ?? '').trim(),
+    });
+  }
+  return findings;
+}
 
-  const maxTokens =
-    Number.isFinite(maxOutputTokens) && maxOutputTokens > 0 ? maxOutputTokens : DEFAULT_MAX_OUTPUT_TOKENS;
+function extractTokens(usage) {
+  const n = Number(usage && usage.total_tokens);
+  return Number.isFinite(n) ? n : 0;
+}
+
+;// CONCATENATED MODULE: ./src/providers/openai.js
+
+
+async function completeOpenAI({
+  apiKey,
+  baseUrl,
+  model,
+  system,
+  user,
+  maxTokens,
+  temperature = 0,
+  timeoutMs = 30000,
+  fetchImpl = fetch,
+} = {}) {
   const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
 
   const body = {
     model,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: buildUserContent(list) },
+      { role: 'system', content: system },
+      { role: 'user', content: user },
     ],
     max_tokens: maxTokens,
-    temperature: 0,
+    temperature,
   };
 
   let response;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
   try {
-    response = await fetch(url, {
+    response = await fetchImpl(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -514,14 +543,14 @@ async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutput
       signal: controller.signal,
     });
   } catch (err) {
-    throw new Error(`inspectCandidates: network error calling ${url}: ${err.message}`);
+    throw new Error(`OpenAI provider error calling ${url}: ${err.message}`);
   }
 
   let rawText;
   try {
     rawText = await response.text();
   } catch (err) {
-    throw new Error(`inspectCandidates: failed to read LLM API response: ${err.message}`);
+    throw new Error(`OpenAI provider: failed to read response: ${err.message}`);
   } finally {
     clearTimeout(timeout);
   }
@@ -535,18 +564,476 @@ async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutput
 
   if (!response.ok) {
     throw new Error(
-      `inspectCandidates: LLM API error HTTP ${response.status}: ${String(rawText).slice(0, 300)}`,
+      `OpenAI provider error HTTP ${response.status}: ${String(rawText).slice(0, 300)}`,
     );
   }
   if (!data || !Array.isArray(data.choices) || data.choices.length === 0) {
-    throw new Error('inspectCandidates: LLM API response had no choices');
+    throw new Error('OpenAI provider response had no choices');
   }
 
   const choice = data.choices[0];
   if (!choice || typeof choice !== 'object' || !choice.message || typeof choice.message !== 'object') {
-    throw new Error('inspectCandidates: LLM API response had a malformed choice');
+    throw new Error('OpenAI provider response had a malformed choice');
   }
-  const content = choice.message.content;
+
+  return {
+    content: choice.message.content,
+    tokensUsed: extractTokens(data.usage),
+  };
+}
+
+;// CONCATENATED MODULE: ./src/providers/claude.js
+async function completeClaude({
+  apiKey,
+  baseUrl = 'https://api.anthropic.com',
+  model = 'claude-haiku-4-5',
+  system,
+  user,
+  maxTokens,
+  temperature = 0,
+  timeoutMs = 30000,
+  fetchImpl = fetch,
+  anthropicVersion = '2023-06-01',
+} = {}) {
+  const url = `${baseUrl.replace(/\/+$/, '')}/v1/messages`;
+
+  const body = {
+    model,
+    max_tokens: maxTokens,
+    temperature,
+    system,
+    messages: [{ role: 'user', content: user }],
+  };
+
+  let response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+  try {
+    response = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': anthropicVersion,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    throw new Error(`Claude provider error calling ${url}: ${err.message}`);
+  }
+
+  let rawText;
+  try {
+    rawText = await response.text();
+  } catch (err) {
+    throw new Error(`Claude provider: failed to read response: ${err.message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  let data;
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Claude provider error HTTP ${response.status}: ${String(rawText).slice(0, 300)}`,
+    );
+  }
+  if (!data || !Array.isArray(data.content)) {
+    throw new Error('Claude provider response had no content blocks');
+  }
+
+  const content = data.content
+    .filter((block) => block && block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text)
+    .join('');
+
+  const tokensUsed = (data.usage && ((data.usage.input_tokens || 0) + (data.usage.output_tokens || 0))) || 0;
+
+  return { content, tokensUsed };
+}
+
+;// CONCATENATED MODULE: ./src/providers/kimi.js
+
+
+async function completeKimi({
+  apiKey,
+  baseUrl = 'https://api.moonshot.ai/v1',
+  model = 'kimi-k2.5',
+  system,
+  user,
+  maxTokens,
+  temperature = 0,
+  timeoutMs = 30000,
+  fetchImpl = fetch,
+  disableThinking = true,
+} = {}) {
+  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+
+  const body = {
+    model,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    max_tokens: maxTokens,
+    temperature,
+  };
+  if (disableThinking !== false) {
+    body.thinking = { type: 'disabled' };
+  }
+
+  let response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+  try {
+    response = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    throw new Error(`Kimi provider error calling ${url}: ${err.message}`);
+  }
+
+  let rawText;
+  try {
+    rawText = await response.text();
+  } catch (err) {
+    throw new Error(`Kimi provider: failed to read response: ${err.message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  let data;
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Kimi provider error HTTP ${response.status}: ${String(rawText).slice(0, 300)}`,
+    );
+  }
+  if (!data || !Array.isArray(data.choices) || data.choices.length === 0) {
+    throw new Error('Kimi provider response had no choices');
+  }
+
+  const choice = data.choices[0];
+  if (!choice || typeof choice !== 'object' || !choice.message || typeof choice.message !== 'object') {
+    throw new Error('Kimi provider response had a malformed choice');
+  }
+
+  return {
+    content: choice.message.content,
+    tokensUsed: extractTokens(data.usage),
+  };
+}
+
+;// CONCATENATED MODULE: ./src/providers/hermes.js
+
+
+async function completeHermes({
+  apiKey,
+  baseUrl = 'https://openrouter.ai/api/v1',
+  model = 'nousresearch/hermes-3-llama-3.1-70b',
+  system,
+  user,
+  maxTokens,
+  temperature = 0,
+  timeoutMs = 30000,
+  fetchImpl = fetch,
+  httpReferer,
+  xTitle,
+} = {}) {
+  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+
+  const headers = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${apiKey}`,
+  };
+  if (httpReferer) headers['HTTP-Referer'] = httpReferer;
+  if (xTitle) headers['X-Title'] = xTitle;
+
+  const body = {
+    model,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    max_tokens: maxTokens,
+    temperature,
+  };
+
+  let response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+  try {
+    response = await fetchImpl(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    throw new Error(`Hermes provider error calling ${url}: ${err.message}`);
+  }
+
+  let rawText;
+  try {
+    rawText = await response.text();
+  } catch (err) {
+    throw new Error(`Hermes provider: failed to read response: ${err.message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  let data;
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Hermes provider error HTTP ${response.status}: ${String(rawText).slice(0, 300)}`,
+    );
+  }
+  if (!data || !Array.isArray(data.choices) || data.choices.length === 0) {
+    throw new Error('Hermes provider response had no choices');
+  }
+
+  const choice = data.choices[0];
+  if (!choice || typeof choice !== 'object' || !choice.message || typeof choice.message !== 'object') {
+    throw new Error('Hermes provider response had a malformed choice');
+  }
+
+  return {
+    content: choice.message.content,
+    tokensUsed: extractTokens(data.usage),
+  };
+}
+
+;// CONCATENATED MODULE: ./src/providers/opencode.js
+async function completeOpenCode({
+  apiKey,
+  baseUrl = 'http://127.0.0.1:4096',
+  model,
+  system,
+  user,
+  maxTokens,
+  timeoutMs = 60000,
+  fetchImpl = fetch,
+  username = 'opencode',
+} = {}) {
+  const authHeaders = {};
+  if (apiKey) {
+    authHeaders['Authorization'] = `Basic ${Buffer.from(`${username}:${apiKey}`).toString('base64')}`;
+  }
+
+  const base = baseUrl.replace(/\/+$/, '');
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+
+  let sessionId;
+  try {
+    let response;
+    try {
+      response = await fetchImpl(`${base}/session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ title: 'health-inspector' }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      throw new Error(`OpenCode provider error creating session: ${err.message}`);
+    }
+
+    let rawText;
+    try {
+      rawText = await response.text();
+    } catch (err) {
+      throw new Error(`OpenCode provider: failed to read session response: ${err.message}`);
+    }
+
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok || !data) {
+      throw new Error(
+        `OpenCode provider error creating session HTTP ${response.status}: ${String(rawText).slice(0, 300)}`,
+      );
+    }
+
+    sessionId = data.id || (data.data && data.data.id);
+    if (!sessionId) {
+      throw new Error('OpenCode provider: no session id in response');
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  try {
+    const messageBody = {
+      system,
+      parts: [{ type: 'text', text: user }],
+    };
+    if (typeof model === 'string' && model.includes('/')) {
+      const [providerID, modelID] = model.split('/');
+      messageBody.model = { providerID, modelID };
+    } else if (model && typeof model === 'object' && !Array.isArray(model)) {
+      messageBody.model = model;
+    }
+
+    let response;
+    const controller2 = new AbortController();
+    const timeout2 = setTimeout(() => controller2.abort(), Math.max(1, timeoutMs));
+    try {
+      response = await fetchImpl(`${base}/session/${sessionId}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify(messageBody),
+        signal: controller2.signal,
+      });
+    } catch (err) {
+      throw new Error(`OpenCode provider error sending message: ${err.message}`);
+    }
+
+    let rawText;
+    try {
+      rawText = await response.text();
+    } catch (err) {
+      throw new Error(`OpenCode provider: failed to read message response: ${err.message}`);
+    } finally {
+      clearTimeout(timeout2);
+    }
+
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok || !data) {
+      throw new Error(
+        `OpenCode provider error sending message HTTP ${response.status}: ${String(rawText).slice(0, 300)}`,
+      );
+    }
+
+    const parts = data.parts || (data.data && data.data.parts) || [];
+    const content = parts
+      .filter((p) => p && p.type === 'text' && typeof p.text === 'string')
+      .map((p) => p.text)
+      .join('');
+
+    const tokensUsed = (data.usage && Number(data.usage.total_tokens)) || 0;
+
+    return { content, tokensUsed };
+  } finally {
+    try {
+      await fetchImpl(`${base}/session/${sessionId}`, {
+        method: 'DELETE',
+        headers: { ...authHeaders },
+      });
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+}
+
+;// CONCATENATED MODULE: ./src/providers/index.js
+
+
+
+
+
+
+const PROVIDERS = {
+  openai: completeOpenAI,
+  claude: completeClaude,
+  anthropic: completeClaude,
+  kimi: completeKimi,
+  moonshot: completeKimi,
+  hermes: completeHermes,
+  opencode: completeOpenCode,
+};
+
+function resolveProvider(name = 'openai') {
+  const key = String(name || 'openai').toLowerCase();
+  const fn = PROVIDERS[key];
+  if (!fn) {
+    throw new Error(
+      `Unknown provider '${name}'. Supported: ${Object.keys(PROVIDERS).filter((k) => !['anthropic', 'moonshot'].includes(k)).join(', ')}`,
+    );
+  }
+  return fn;
+}
+
+function listProviders() {
+  return ['openai', 'claude', 'kimi', 'hermes', 'opencode'];
+}
+
+;// CONCATENATED MODULE: ./src/inspect.js
+
+
+
+async function inspectCandidates({
+  candidates,
+  apiKey,
+  baseUrl,
+  model,
+  maxOutputTokens,
+  timeoutMs = 30000,
+  provider = 'openai',
+  fetchImpl,
+  ...providerOpts
+} = {}) {
+  const list = Array.isArray(candidates) ? candidates.map(redactCandidate) : [];
+  if (list.length === 0) {
+    return { findings: [], reportMarkdown: null, tokensUsed: 0 };
+  }
+
+  if (provider !== 'opencode') {
+    if (!apiKey) throw new Error('inspectCandidates: apiKey is required');
+    if (!baseUrl) throw new Error('inspectCandidates: baseUrl is required');
+    if (!model) throw new Error('inspectCandidates: model is required');
+  }
+
+  const maxTokens =
+    Number.isFinite(maxOutputTokens) && maxOutputTokens > 0
+      ? maxOutputTokens
+      : DEFAULT_MAX_OUTPUT_TOKENS;
+
+  const complete = resolveProvider(provider);
+  const { content, tokensUsed } = await complete({
+    apiKey,
+    baseUrl,
+    model,
+    system: SYSTEM_PROMPT,
+    user: buildUserContent(list),
+    maxTokens,
+    timeoutMs,
+    fetchImpl,
+    ...providerOpts,
+  });
+
   const parsed = parseJsonContent(content);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('inspectCandidates: model response JSON must be an object');
@@ -555,26 +1042,7 @@ async function inspectCandidates({ candidates, apiKey, baseUrl, model, maxOutput
     throw new Error('inspectCandidates: model response findings must be an array');
   }
 
-  const modelFindings = parsed.findings;
-  const findings = [];
-  for (const f of modelFindings) {
-    if (!f || typeof f !== 'object' || Array.isArray(f)) continue;
-    if (f.confirmed !== true) continue;
-    const index = Number(f.index);
-    const candidate = list[index - 1];
-    if (!candidate) continue;
-    findings.push({
-      ...candidate,
-      confirmed: true,
-      severity: VALID_SEVERITIES.has(f.severity) ? f.severity : 'medium',
-      reason: String(f.reason ?? '').trim(),
-    });
-  }
-
-  const tokensUsed = Number.isFinite(Number(data.usage && data.usage.total_tokens))
-    ? Number(data.usage.total_tokens)
-    : 0;
-
+  const findings = mapModelFindings(list, parsed);
   const reportMarkdown = buildReport(findings, parsed.summary_markdown);
   return { findings, reportMarkdown, tokensUsed };
 }
@@ -1111,6 +1579,7 @@ async function notifyWebhook(options) {
 
 
 const DEFAULT_CONFIG = {
+  provider: 'openai',
   baseUrl: 'https://api.deepseek.com',
   model: 'deepseek-chat',
   apiKey: undefined,
@@ -1156,6 +1625,7 @@ function loadConfigFile(cwd) {
 
 const ENV_MAP = [
   ['HEALTH_INSPECTOR_API_KEY', 'apiKey', (v) => v],
+  ['HEALTH_INSPECTOR_PROVIDER', 'provider', (v) => v],
   ['HEALTH_INSPECTOR_BASE_URL', 'baseUrl', (v) => v],
   ['HEALTH_INSPECTOR_MODEL', 'model', (v) => v],
   ['HEALTH_INSPECTOR_MAX_CANDIDATES', 'maxCandidates', (v) => Number.parseInt(v, 10)],
@@ -1225,6 +1695,12 @@ function validateConfig(config) {
       throw new Error(`failOn must be one of none|low|medium|high|all, got ${config.failOn}`);
     }
   }
+  if (config.provider !== undefined) {
+    const validProviders = new Set(['openai', 'claude', 'anthropic', 'kimi', 'moonshot', 'hermes', 'opencode']);
+    if (!validProviders.has(config.provider)) {
+      throw new Error(`provider must be one of openai|claude|anthropic|kimi|moonshot|hermes|opencode, got ${config.provider}`);
+    }
+  }
   if (config.rules !== undefined && config.rules !== null) {
     if (!Array.isArray(config.rules)) {
       throw new Error(`rules must be an array, got ${typeof config.rules}`);
@@ -1253,6 +1729,25 @@ function resolveConfig({ flags, env, fileConfig, defaults } = {}) {
   defineFrom(out, flags);
   validateConfig(out);
   return out;
+}
+
+const PROVIDER_DEFAULTS = {
+  claude: { baseUrl: 'https://api.anthropic.com', model: 'claude-haiku-4-5' },
+  anthropic: { baseUrl: 'https://api.anthropic.com', model: 'claude-haiku-4-5' },
+  kimi: { baseUrl: 'https://api.moonshot.ai/v1', model: 'kimi-k2.5' },
+  moonshot: { baseUrl: 'https://api.moonshot.ai/v1', model: 'kimi-k2.5' },
+  hermes: { baseUrl: 'https://openrouter.ai/api/v1', model: 'nousresearch/hermes-3-llama-3.1-70b' },
+  opencode: { baseUrl: 'http://127.0.0.1:4096' },
+};
+
+function applyProviderDefaults(config) {
+  if (!config || typeof config !== 'object') return config;
+  const provider = config.provider || 'openai';
+  const defaults = PROVIDER_DEFAULTS[provider];
+  if (!defaults) return config;
+  if (!config.baseUrl || config.baseUrl === DEFAULT_CONFIG.baseUrl) config.baseUrl = defaults.baseUrl;
+  if (defaults.model && (!config.model || config.model === DEFAULT_CONFIG.model)) config.model = defaults.model;
+  return config;
 }
 
 ;// CONCATENATED MODULE: ./src/index.js
@@ -1348,6 +1843,7 @@ function buildActionConfig(rootDir) {
   const webhookHeadersInput = input('webhook-headers');
   const flags = {
     apiKey: input('api-key'),
+    provider: input('provider'),
     baseUrl: input('base-url'),
     model: input('model'),
     maxCandidates: intInput('max-candidates'),
@@ -1392,6 +1888,7 @@ function buildGithubClientOptions() {
 async function main() {
   const rootDir = external_node_path_namespaceObject.resolve(input('paths') || '.');
   const config = buildActionConfig(rootDir);
+  applyProviderDefaults(config);
   const { owner, repo } = parseOwnerRepo(process.env.GITHUB_REPOSITORY);
 
   if (!config.apiKey) throw new Error('Missing required input: api-key');
@@ -1436,6 +1933,7 @@ async function main() {
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
     model: config.model,
+    provider: config.provider || 'openai',
   });
   const state = { ...loaded, lastScannedRef: currentRef };
   const result = await fileReport({

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import { resolveConfig, loadConfigFile } from './config.js';
+import { resolveConfig, loadConfigFile, applyProviderDefaults } from './config.js';
 import { runInspection } from './core.js';
 import {
   loadLocalState,
@@ -32,6 +32,7 @@ function parseJsonFile(filePath) {
 
 const VALUE_OPTIONS = new Map([
   ['--config', 'configPath'],
+  ['--provider', 'provider'],
   ['--format', 'format'],
   ['--max-candidates', 'maxCandidates'],
   ['--model', 'model'],
@@ -141,7 +142,8 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
         'Usage: health-inspector [path] [options]\n\n' +
           'Outputs:  --format json|markdown|sarif|github-annotation\n' +
           'Run mode: --dry-run --offline\n' +
-          'Inspect:  --since REF --max-candidates N --model M --base-url U --api-key K\n' +
+          'Inspect:  --provider openai|claude|kimi|hermes|opencode\n' +
+          '          --since REF --max-candidates N --model M --base-url U --api-key K\n' +
           'Rules:    --rules a,b --exclude-rules a,b --oversized-lines N\n' +
           'Failure:  --fail-on none|low|medium|high|all\n' +
           'Config:   --config PATH --state-file PATH --outbox-dir PATH\n' +
@@ -161,6 +163,7 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
     }
 
     const config = resolveConfig({ flags, env: process.env, fileConfig });
+    applyProviderDefaults(config);
 
     const stateFile = path.isAbsolute(config.stateFile)
       ? config.stateFile

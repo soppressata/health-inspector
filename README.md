@@ -130,7 +130,26 @@ this run), `report-url` (URL of the filed issue, if any), `webhook-delivered`
 (`true` when an optional findings webhook was delivered), and
 `webhook-delivery-id` (the delivery ID for the fired webhook).
 
-## CLI Configuration
+## Providers
+
+Health Inspector supports multiple LLM backends. Select one with `--provider` (CLI) or the `provider` input (Action). Each provider applies its own default `base-url` and `model` if you do not set them explicitly.
+
+| provider | API | default base | default model | auth |
+| --- | --- | --- | --- | --- |
+| `openai` | OpenAI chat/completions | `api.deepseek.com` | `deepseek-chat` | Bearer |
+| `claude` | Anthropic Messages `/v1/messages` | `api.anthropic.com` | `claude-haiku-4-5` | `x-api-key` |
+| `kimi` | Moonshot OpenAI-compat | `api.moonshot.ai/v1` | `kimi-k2.5` | Bearer |
+| `hermes` | OpenRouter OpenAI-compat | `openrouter.ai/api/v1` | `nousresearch/hermes-3-llama-3.1-70b` | Bearer |
+| `opencode` | OpenCode server sessions API | `http://127.0.0.1:4096` | (server default) | optional Basic |
+
+```sh
+health-inspector . --provider claude --api-key $ANTHROPIC_API_KEY
+health-inspector . --provider kimi --api-key $MOONSHOT_API_KEY
+health-inspector . --provider hermes --api-key $OPENROUTER_API_KEY
+health-inspector . --provider opencode --base-url http://127.0.0.1:4096
+```
+
+The `claude` and `anthropic` names both resolve to the Anthropic Messages backend; `kimi` and `moonshot` both resolve to the Moonshot OpenAI-compatible backend.
 
 Health Inspector resolves configuration with a clear precedence:
 **flags > env > `.health-inspector.json` > defaults**. This applies to both the
