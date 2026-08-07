@@ -161,7 +161,7 @@ test('renderSarif: produces a valid SARIF 2.1.0 document with results', () => {
   assert.equal(sarif.$schema, 'https://json.schemastore.org/sarif-2.1.0.json');
   assert.equal(sarif.runs.length, 1);
   assert.equal(sarif.runs[0].tool.driver.name, 'health-inspector');
-  assert.equal(sarif.runs[0].tool.driver.version, '0.1.0');
+  assert.equal(sarif.runs[0].tool.driver.version, '1.1.0');
   assert.equal(sarif.runs[0].tool.driver.rules.length, Object.keys(SCAN_RULES).length);
   assert.ok(sarif.runs[0].tool.driver.rules.some((r) => r.id === 'bare_except'));
   assert.equal(sarif.runs[0].results.length, 3);

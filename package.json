@@ -1,6 +1,6 @@
 {
   "name": "health-inspector-action",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "description": "A GitHub Action that audits your repo and files a report only when it finds real violations.",
   "type": "module",
   "private": false,

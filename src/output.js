@@ -63,7 +63,7 @@ export function renderSarif(result) {
     $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
     runs: [{
       tool: {
-        driver: { name: 'health-inspector', version: '0.1.0', rules },
+        driver: { name: 'health-inspector', version: '1.1.0', rules },
       },
       results,
     }],

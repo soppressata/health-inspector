@@ -3,6 +3,37 @@
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Security
+
+## [1.1.0] - 2026-08-07
+
+### Added
+- `buildCliWebhookOptions` helper for testable CLI webhook option assembly.
+- Action `scan-paths` input is read into `config.scanPaths`.
+
+### Fixed
+- CLI webhook delivery maps HMAC via `signingSecret`/`signatureHeader`; plain `webhookSecret`/`webhookSecretHeader` stay separate.
+- Failed webhook deliveries are no longer recorded as delivered; `outboxDir` and local state are passed for retry/replay.
+- `fileReport` no longer mutates caller state; returns new `updatedState` with copied fingerprints.
+- `verifySignature` accepts raw hex and `sha256=<hex>` (matching `sendWebhook`).
+- `inspectCandidates` `tokensUsed` is `0` (not `null`) when model omits usage.
+- GitHub Contents API paths encode segments individually so nested paths keep slashes.
+
+### Changed
+- CI installs actionlint from a pinned direct release tarball (v1.7.7) instead of scraping the GitHub Releases API.
+- Workflow shell scripts cleaned for actionlint/shellcheck SC2034.
+
+### Security
+- CLI no longer places the HMAC signing secret into the plain shared-secret header.
+
+## [1.0.0] - 2026-08-06
+
+### Added
 - **Local CLI** (`bin/health-inspector.js`) with `--format json|markdown|sarif|github-annotation|markdown-table`, `--offline`, `--dry-run`, `--include-snippets`, validation, safe defaults that omit snippets, and CI-friendly exit codes (0 clean, 1 findings, 2 invalid options, 3 failures).
 - **Shared inspection core** and output renderers (`src/core.js`, `src/output.js`) so local scans do not require GitHub credentials or Actions environment variables.
 - **Config file support** (`.health-inspector.json`) with precedence `flags > env > file > defaults` (`src/config.js`): `loadConfigFile`, `envToConfig` mapping `HEALTH_INSPECTOR_*` env vars, `resolveConfig`, and `validateConfig` for `maxCandidates`, `probability`, `oversizedFunctionLines`, `failOn`, `rules`, and `excludeRules`.
@@ -18,7 +49,6 @@
 - **GitHub annotation output** (`--format github-annotation`) — emits `::error`/`::warning` workflow commands.
 - **GitHub client hardening** (`src/github.js`): `makeGithubClient` with per-request timeout (AbortController), exponential-backoff retries for transient failures, and `isRetryable` classification (408, 425, 429, 5xx).
 - **Action inputs**: `webhook-signing-secret`, `webhook-signature-header`, `github-request-timeout-ms`, `github-max-retries`, `scan-paths`.
-- **`buildCliWebhookOptions` helper** for testable CLI webhook option assembly.
 - **Action outputs**: `webhook-delivered` and `webhook-delivery-id` for webhook delivery tracking.
 - **Action config pass-through**: `buildActionConfig` and `buildGithubClientOptions` resolve Action inputs using the same `flags > env > file > defaults` precedence as the CLI.
 - **Stage 0 static scanner** (`src/scan.js`): `todo_fixme`, `secret_like`, `bare_except`, `untested_new_function`, `oversized_function`. Deterministic, no LLM calls. Supports git-diff-based scanning since the last inspected ref (`sinceRef`), falling back to a full scan; candidates ranked and capped at 15 by default (`max-candidates`).
@@ -41,16 +71,10 @@
 ### Fixed
 - Preserve state when a run has no newly reportable findings, preventing repeated scans and duplicate work.
 - Include standard untracked files in full scans, distinguish repeated findings by line, validate malformed model responses, enforce both snippet limits, and detect `catch {}`.
-- CLI webhook delivery now maps HMAC signing via `signingSecret`/`signatureHeader`; plain `webhookSecret`/`webhookSecretHeader` stay separate. Failed deliveries are no longer recorded as delivered; `outboxDir` and local state are passed through for retry/replay.
-- `fileReport` no longer mutates the caller state object; returns a new `updatedState` with copied fingerprints.
-- `verifySignature` accepts both raw hex and `sha256=<hex>` header forms (matching what `sendWebhook` emits).
-- `inspectCandidates` `tokensUsed` is `0` (not `null`) when the model omits usage.
-- GitHub Contents API paths encode path segments individually so nested paths keep slashes.
-- Action input `scan-paths` is now read into `config.scanPaths`.
 
 ### Security
 - Redact secret-looking values before model inspection and exclude snippets from webhook payloads by default. Webhook failures are best-effort after durable Action state writes.
 
-<!-- TYPES: Generated -->
-### Deprecated
-### Removed
+[Unreleased]: https://github.com/soppressata/health-inspector/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/soppressata/health-inspector/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/soppressata/health-inspector/releases/tag/v1.0.0
