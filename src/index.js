@@ -111,6 +111,17 @@ export function buildActionConfig(rootDir) {
       if (!raw) return undefined;
       return raw.split(/\s+/).map(s => s.trim()).filter(Boolean);
     })(),
+    rules: (() => {
+      const raw = input('rules');
+      if (!raw) return undefined;
+      return raw.split(',').map(s => s.trim()).filter(Boolean);
+    })(),
+    excludeRules: (() => {
+      const raw = input('exclude-rules');
+      if (!raw) return undefined;
+      return raw.split(',').map(s => s.trim()).filter(Boolean);
+    })(),
+    oversizedFunctionLines: intInput('oversized-lines'),
   };
   return resolveConfig({
     flags,
@@ -118,6 +129,18 @@ export function buildActionConfig(rootDir) {
     fileConfig: loadConfigFile(rootDir),
     defaults: {},
   });
+}
+
+/**
+ * Whether an api-key is required for the given (already-defaulted) config.
+ * Mirrors the opencode bypass in inspectCandidates so the Action entry point
+ * stays consistent with the inspection layer.
+ * @param {object} config
+ * @returns {boolean}
+ */
+export function requiresApiKey(config) {
+  const provider = (config && config.provider) || 'openai';
+  return provider !== 'opencode';
 }
 
 /**
@@ -138,7 +161,7 @@ export async function main() {
   applyProviderDefaults(config);
   const { owner, repo } = parseOwnerRepo(process.env.GITHUB_REPOSITORY);
 
-  if (!config.apiKey) throw new Error('Missing required input: api-key');
+  if (requiresApiKey(config) && !config.apiKey) throw new Error('Missing required input: api-key');
   if (!config.githubToken) throw new Error('Missing required input: github-token');
 
   if (Math.random() > config.probability) {
@@ -154,6 +177,7 @@ export async function main() {
   const candidates = await scanRepo({
     rootDir,
     sinceRef: loaded.lastScannedRef,
+    paths: config.scanPaths && config.scanPaths.length ? config.scanPaths : undefined,
     maxCandidates: config.maxCandidates,
     oversizedLines: config.oversizedFunctionLines,
     rules: config.rules,

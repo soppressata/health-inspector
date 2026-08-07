@@ -312,12 +312,15 @@ Webhooks are delivered only when newly confirmed findings exist.
 
 | Input | Description | Required | Default |
 | --- | --- | --- | --- |
-| `api-key` | LLM API key (e.g. DeepSeek). | yes | |
+| `api-key` | LLM API key (e.g. DeepSeek). Not required when `provider` is `opencode`. | yes | |
 | `base-url` | Base URL of the OpenAI-compatible chat completions API. | no | `https://api.deepseek.com` |
 | `model` | Model to use for the inspection report. | no | `deepseek-chat` |
 | `probability` | Chance (0-1) that this run actually executes. | no | `1.0` |
 | `paths` | Repository path to scan. | no | `.` |
-| `scan-paths` | Space-separated list of paths to scan (defaults to `paths`). | no | `.` |
+| `scan-paths` | Space-separated list of paths to scan (defaults to `paths`). When set, Stage-0 only scans files under these paths. | no | `.` |
+| `rules` | Comma-separated list of rule names to enable (defaults to all). | no | |
+| `exclude-rules` | Comma-separated list of rule names to exclude. | no | |
+| `oversized-lines` | Positive integer line threshold for oversized functions. | no | `80` |
 | `max-candidates` | Maximum number of scan candidates to pass to the model. | no | `15` |
 | `label` | Label used for filed issue reports. | no | `health-inspector` |
 | `state-branch` | Branch used to persist state (last-scanned ref, filed fingerprints). | no | `health-inspector-state` |

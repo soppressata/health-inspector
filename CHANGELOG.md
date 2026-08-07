@@ -4,9 +4,12 @@
 
 ### Added
 
-- **Multi-provider support:** `provider` config key, `--provider` CLI flag, `provider` Action input, and `HEALTH_INSPECTOR_PROVIDER` env var. Supported providers: `openai`, `claude`, `kimi`, `hermes`, `opencode` (`anthropic` and `moonshot` are accepted as aliases). `applyProviderDefaults` applies per-provider `baseUrl`/`model` defaults when the user does not set them explicitly.
+- **Action inputs:** `rules`, `exclude-rules`, and `oversized-lines` are now wired through `buildActionConfig` and passed to Stage-0 `scanRepo`, matching the existing CLI flags.
 
 ### Fixed
+
+- **scan-paths / scanPaths now filter Stage-0 scan.** `buildActionConfig` parses `scan-paths` into an array and `scanRepo` uses it as a path filter — previously the input was documented but had no effect on the scan scope.
+- **Action api-key optional for opencode.** `requiresApiKey` returns `false` when `provider` is `opencode`, so the Action no longer requires an `api-key` input for that provider (mirrors the provider's optional Basic auth).
 
 ### Security
 

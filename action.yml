@@ -30,6 +30,16 @@ inputs:
     description: 'Space-separated list of paths to scan (defaults to paths input).'
     required: false
     default: '.'
+  rules:
+    description: 'Comma-separated list of rule names to enable (defaults to all).'
+    required: false
+  exclude-rules:
+    description: 'Comma-separated list of rule names to exclude.'
+    required: false
+  oversized-lines:
+    description: 'Positive integer line threshold for oversized functions.'
+    required: false
+    default: '80'
   max-candidates:
     description: 'Maximum number of scan candidates to pass to the model.'
     required: false

@@ -55,7 +55,7 @@ const BOOL_OPTIONS = new Map([
   ['--offline', 'offline'],
 ]);
 
-const VALID_FORMATS = new Set(['json', 'markdown', 'sarif', 'github-annotation']);
+const VALID_FORMATS = new Set(['json', 'markdown', 'markdown-table', 'sarif', 'github-annotation']);
 const VALID_FAIL_ON = new Set(['none', 'low', 'medium', 'high', 'all']);
 
 export function parseArgs(argv = []) {
@@ -83,7 +83,7 @@ export function parseArgs(argv = []) {
   }
 
   if (!VALID_FORMATS.has(options.format)) {
-    throw usageError('--format must be one of json, markdown, sarif, github-annotation');
+    throw usageError('--format must be one of json, markdown, markdown-table, sarif, github-annotation');
   }
   if (options.maxCandidates !== undefined) {
     options.maxCandidates = Number(options.maxCandidates);
@@ -140,7 +140,7 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
     if (flags.help) {
       io.stdout.write(
         'Usage: health-inspector [path] [options]\n\n' +
-          'Outputs:  --format json|markdown|sarif|github-annotation\n' +
+          'Outputs:  --format json|markdown|markdown-table|sarif|github-annotation\n' +
           'Run mode: --dry-run --offline\n' +
           'Inspect:  --provider openai|claude|kimi|hermes|opencode\n' +
           '          --since REF --max-candidates N --model M --base-url U --api-key K\n' +

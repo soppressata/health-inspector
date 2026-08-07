@@ -309,6 +309,49 @@ test('listRules returns the correct set of rule names', async () => {
   );
 });
 
+test('paths limits scan to given directories', async () => {
+  const repo = makeRepo();
+  write(path.join(repo, 'src/a.js'), '// TODO: in src\n');
+  write(path.join(repo, 'lib/b.js'), '// TODO: in lib\n');
+  write(path.join(repo, 'tests/c.js'), '// TODO: in tests\n');
+  commitAll(repo, 'multi-dir');
+
+  const result = await scanRepo({ rootDir: repo, sinceRef: null, maxCandidates: 50, paths: ['src', 'tests'] });
+  const todos = result.filter((c) => c.type === 'todo_fixme');
+
+  assert.ok(todos.some((c) => c.file === 'src/a.js'));
+  assert.ok(todos.some((c) => c.file === 'tests/c.js'));
+  assert.ok(!todos.some((c) => c.file === 'lib/b.js'));
+});
+
+test('paths with empty or undefined value performs a full scan', async () => {
+  const repo = makeRepo();
+  write(path.join(repo, 'src/a.js'), '// TODO: in src\n');
+  write(path.join(repo, 'lib/b.js'), '// TODO: in lib\n');
+  commitAll(repo, 'full scan');
+
+  const r1 = await scanRepo({ rootDir: repo, sinceRef: null, maxCandidates: 50, paths: [] });
+  const r2 = await scanRepo({ rootDir: repo, sinceRef: null, maxCandidates: 50 });
+  const r3 = await scanRepo({ rootDir: repo, sinceRef: null, maxCandidates: 50, paths: undefined });
+
+  assert.equal(r1.filter((c) => c.type === 'todo_fixme').length, 2);
+  assert.equal(r2.filter((c) => c.type === 'todo_fixme').length, 2);
+  assert.equal(r3.filter((c) => c.type === 'todo_fixme').length, 2);
+});
+
+test('paths supports file-level filtering', async () => {
+  const repo = makeRepo();
+  write(path.join(repo, 'src/a.js'), '// TODO: target file\n');
+  write(path.join(repo, 'src/b.js'), '// TODO: other file\n');
+  commitAll(repo, 'file filter');
+
+  const result = await scanRepo({ rootDir: repo, sinceRef: null, maxCandidates: 50, paths: ['src/a.js'] });
+  const todos = result.filter((c) => c.type === 'todo_fixme');
+
+  assert.equal(todos.length, 1);
+  assert.equal(todos[0].file, 'src/a.js');
+});
+
 test('backward compatibility: scanRepo without new options behaves as before', async () => {
   const repo = makeRepo();
   write(path.join(repo, 'src/base.js'), '// TODO: pre-existing\n');

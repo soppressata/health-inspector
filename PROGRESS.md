@@ -132,13 +132,14 @@ Do not stop the loop until every item is `[x]` AND item 9's Actions run is actua
 
 ## Verification notes
 
-- **action.yml vs index.js**: `buildActionConfig` reads 16 Action inputs into its flags
+- **action.yml vs index.js**: `buildActionConfig` reads Action inputs into its flags
   object (`api-key`, `base-url`, `model`, `max-candidates`, `probability`, `label`,
   `state-branch`, `github-token`, `webhook-url`, `webhook-headers`, `webhook-secret`,
   `webhook-secret-header`, `webhook-timeout-ms`, `webhook-retries`, `webhook-signing-secret`,
-  `webhook-signature-header`). `buildGithubClientOptions` reads `github-request-timeout-ms`
-  and `github-max-retries`. The `paths` input is read directly in `main()`. The `scan-paths`
-  input is defined in action.yml but not consumed by `buildActionConfig` — it currently has
-  no effect on behavior (documented only, no code change per constraints).
+  `webhook-signature-header`, `scan-paths`, `rules`, `exclude-rules`, `oversized-lines`).
+  `buildGithubClientOptions` reads `github-request-timeout-ms` and `github-max-retries`.
+  The `paths` input is read directly in `main()`. The `scan-paths` input is now parsed
+  into an array by `buildActionConfig` and passed to `scanRepo` as the `paths` filter —
+  it now actually limits the Stage-0 scan scope (gap closed).
 - **Exit codes**: CLI returns 0 (clean), 1 (findings), 2 (invalid options),
   3 (failures). `--offline` and `--dry-run` never call the LLM.

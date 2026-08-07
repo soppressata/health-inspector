@@ -32,7 +32,8 @@ __nccwpck_require__.d(__webpack_exports__, {
   ns: () => (/* binding */ buildActionConfig),
   NZ: () => (/* binding */ buildGithubClientOptions),
   V4: () => (/* binding */ getInput),
-  iW: () => (/* binding */ main)
+  iW: () => (/* binding */ main),
+  k4: () => (/* binding */ requiresApiKey)
 });
 
 ;// CONCATENATED MODULE: external "node:child_process"
@@ -76,6 +77,19 @@ const EXPORT_FUNC_RE =
 
 function candidate(type, file, line, snippet) {
   return { type, file, line, snippet, severity_hint: SEVERITY_HINT[type] };
+}
+
+function normalizeRel(p) {
+  return external_node_path_namespaceObject.normalize(String(p)).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '');
+}
+
+function matchesPaths(file, paths) {
+  if (!paths || paths.length === 0) return true;
+  const f = normalizeRel(file);
+  return paths.some((p) => {
+    const np = normalizeRel(p);
+    return f === np || f.startsWith(np + '/');
+  });
 }
 
 function isIgnored(file) {
@@ -325,7 +339,7 @@ function validateRuleNames(names, optionName) {
   }
 }
 
-async function scanRepo({ rootDir, sinceRef, maxCandidates, oversizedLines, rules, excludeRules } = {}) {
+async function scanRepo({ rootDir, sinceRef, maxCandidates, oversizedLines, rules, excludeRules, paths } = {}) {
   if (maxCandidates !== undefined && (!Number.isInteger(maxCandidates) || maxCandidates <= 0)) {
     throw new TypeError('scanRepo: maxCandidates must be a positive integer');
   }
@@ -336,6 +350,10 @@ async function scanRepo({ rootDir, sinceRef, maxCandidates, oversizedLines, rule
   validateRuleNames(rules, 'rules');
   validateRuleNames(excludeRules, 'excludeRules');
 
+  if (paths !== undefined && !Array.isArray(paths)) {
+    throw new TypeError('scanRepo: paths must be an array');
+  }
+
   const ruleNames = listRules();
   const enabledRules = new Set(rules && rules.length > 0 ? rules : ruleNames);
   if (excludeRules) {
@@ -344,10 +362,11 @@ async function scanRepo({ rootDir, sinceRef, maxCandidates, oversizedLines, rule
 
   const threshold = oversizedLines ?? 80;
   const dir = external_node_path_namespaceObject.resolve(rootDir || process.cwd());
+  const normalizedPaths = (paths || []).map(normalizeRel).filter(Boolean);
 
   let files = sinceRef ? changedFilesSince(dir, sinceRef) : null;
   if (!files) files = allTracked(dir);
-  files = files.filter((f) => !isIgnored(f));
+  files = files.filter((f) => !isIgnored(f)).filter((f) => matchesPaths(f, normalizedPaths));
 
   const candidates = [];
   for (const file of files) {
@@ -1864,6 +1883,17 @@ function buildActionConfig(rootDir) {
       if (!raw) return undefined;
       return raw.split(/\s+/).map(s => s.trim()).filter(Boolean);
     })(),
+    rules: (() => {
+      const raw = input('rules');
+      if (!raw) return undefined;
+      return raw.split(',').map(s => s.trim()).filter(Boolean);
+    })(),
+    excludeRules: (() => {
+      const raw = input('exclude-rules');
+      if (!raw) return undefined;
+      return raw.split(',').map(s => s.trim()).filter(Boolean);
+    })(),
+    oversizedFunctionLines: intInput('oversized-lines'),
   };
   return resolveConfig({
     flags,
@@ -1871,6 +1901,18 @@ function buildActionConfig(rootDir) {
     fileConfig: loadConfigFile(rootDir),
     defaults: {},
   });
+}
+
+/**
+ * Whether an api-key is required for the given (already-defaulted) config.
+ * Mirrors the opencode bypass in inspectCandidates so the Action entry point
+ * stays consistent with the inspection layer.
+ * @param {object} config
+ * @returns {boolean}
+ */
+function requiresApiKey(config) {
+  const provider = (config && config.provider) || 'openai';
+  return provider !== 'opencode';
 }
 
 /**
@@ -1891,7 +1933,7 @@ async function main() {
   applyProviderDefaults(config);
   const { owner, repo } = parseOwnerRepo(process.env.GITHUB_REPOSITORY);
 
-  if (!config.apiKey) throw new Error('Missing required input: api-key');
+  if (requiresApiKey(config) && !config.apiKey) throw new Error('Missing required input: api-key');
   if (!config.githubToken) throw new Error('Missing required input: github-token');
 
   if (Math.random() > config.probability) {
@@ -1907,6 +1949,7 @@ async function main() {
   const candidates = await scanRepo({
     rootDir,
     sinceRef: loaded.lastScannedRef,
+    paths: config.scanPaths && config.scanPaths.length ? config.scanPaths : undefined,
     maxCandidates: config.maxCandidates,
     oversizedLines: config.oversizedFunctionLines,
     rules: config.rules,
@@ -1996,4 +2039,5 @@ var __webpack_exports__buildActionConfig = __webpack_exports__.ns;
 var __webpack_exports__buildGithubClientOptions = __webpack_exports__.NZ;
 var __webpack_exports__getInput = __webpack_exports__.V4;
 var __webpack_exports__main = __webpack_exports__.iW;
-export { __webpack_exports__buildActionConfig as buildActionConfig, __webpack_exports__buildGithubClientOptions as buildGithubClientOptions, __webpack_exports__getInput as getInput, __webpack_exports__main as main };
+var __webpack_exports__requiresApiKey = __webpack_exports__.k4;
+export { __webpack_exports__buildActionConfig as buildActionConfig, __webpack_exports__buildGithubClientOptions as buildGithubClientOptions, __webpack_exports__getInput as getInput, __webpack_exports__main as main, __webpack_exports__requiresApiKey as requiresApiKey };

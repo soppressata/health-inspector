@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-import { getInput, buildActionConfig, buildGithubClientOptions } from '../src/index.js';
+import { getInput, buildActionConfig, buildGithubClientOptions, requiresApiKey } from '../src/index.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 
 /**
@@ -270,6 +270,64 @@ test('buildActionConfig parses INPUT_SCAN-PATHS into array', () => {
     const config = buildActionConfig(dir);
     assert.deepEqual(config.scanPaths, ['src', 'tests']);
   });
+});
+
+test('buildActionConfig parses INPUT_RULES into a comma-separated array', () => {
+  const dir = tmpDir();
+  withEnv({ 'INPUT_RULES': 'todo_fixme,secret_like' }, () => {
+    const config = buildActionConfig(dir);
+    assert.deepEqual(config.rules, ['todo_fixme', 'secret_like']);
+  });
+});
+
+test('buildActionConfig parses INPUT_RULES with surrounding whitespace', () => {
+  const dir = tmpDir();
+  withEnv({ 'INPUT_RULES': ' todo_fixme ,  secret_like ' }, () => {
+    const config = buildActionConfig(dir);
+    assert.deepEqual(config.rules, ['todo_fixme', 'secret_like']);
+  });
+});
+
+test('buildActionConfig falls back to all rules when INPUT_RULES is unset', () => {
+  const dir = tmpDir();
+  const config = withEnv({}, () => buildActionConfig(dir));
+  assert.equal(config.rules, undefined);
+});
+
+test('buildActionConfig parses INPUT_EXCLUDE-RULES into a comma-separated array', () => {
+  const dir = tmpDir();
+  withEnv({ 'INPUT_EXCLUDE-RULES': 'bare_except,oversized_function' }, () => {
+    const config = buildActionConfig(dir);
+    assert.deepEqual(config.excludeRules, ['bare_except', 'oversized_function']);
+  });
+});
+
+test('buildActionConfig parses INPUT_OVERSIZED-LINES into an int', () => {
+  const dir = tmpDir();
+  withEnv({ 'INPUT_OVERSIZED-LINES': '120' }, () => {
+    const config = buildActionConfig(dir);
+    assert.equal(config.oversizedFunctionLines, 120);
+  });
+});
+
+test('buildActionConfig falls back to the default oversized-lines when unset', () => {
+  const dir = tmpDir();
+  const config = withEnv({}, () => buildActionConfig(dir));
+  assert.equal(config.oversizedFunctionLines, 80);
+});
+
+test('requiresApiKey is required for non-opencode providers', () => {
+  assert.equal(requiresApiKey({ provider: 'openai' }), true);
+  assert.equal(requiresApiKey({ provider: 'claude' }), true);
+});
+
+test('requiresApiKey is bypassed for the opencode provider', () => {
+  assert.equal(requiresApiKey({ provider: 'opencode' }), false);
+});
+
+test('requiresApiKey defaults to required when no provider is set', () => {
+  assert.equal(requiresApiKey({}), true);
+  assert.equal(requiresApiKey(undefined), true);
 });
 
 test('buildGithubClientOptions reads INPUT_GITHUB-REQUEST-TIMEOUT-MS / GITHUB-MAX-RETRIES', () => {

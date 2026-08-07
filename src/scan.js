@@ -32,6 +32,19 @@ function candidate(type, file, line, snippet) {
   return { type, file, line, snippet, severity_hint: SEVERITY_HINT[type] };
 }
 
+function normalizeRel(p) {
+  return path.normalize(String(p)).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '');
+}
+
+function matchesPaths(file, paths) {
+  if (!paths || paths.length === 0) return true;
+  const f = normalizeRel(file);
+  return paths.some((p) => {
+    const np = normalizeRel(p);
+    return f === np || f.startsWith(np + '/');
+  });
+}
+
 function isIgnored(file) {
   return file.split(/[\\/]/).some((seg) => IGNORE_DIRS.has(seg));
 }
@@ -279,7 +292,7 @@ function validateRuleNames(names, optionName) {
   }
 }
 
-export async function scanRepo({ rootDir, sinceRef, maxCandidates, oversizedLines, rules, excludeRules } = {}) {
+export async function scanRepo({ rootDir, sinceRef, maxCandidates, oversizedLines, rules, excludeRules, paths } = {}) {
   if (maxCandidates !== undefined && (!Number.isInteger(maxCandidates) || maxCandidates <= 0)) {
     throw new TypeError('scanRepo: maxCandidates must be a positive integer');
   }
@@ -290,6 +303,10 @@ export async function scanRepo({ rootDir, sinceRef, maxCandidates, oversizedLine
   validateRuleNames(rules, 'rules');
   validateRuleNames(excludeRules, 'excludeRules');
 
+  if (paths !== undefined && !Array.isArray(paths)) {
+    throw new TypeError('scanRepo: paths must be an array');
+  }
+
   const ruleNames = listRules();
   const enabledRules = new Set(rules && rules.length > 0 ? rules : ruleNames);
   if (excludeRules) {
@@ -298,10 +315,11 @@ export async function scanRepo({ rootDir, sinceRef, maxCandidates, oversizedLine
 
   const threshold = oversizedLines ?? 80;
   const dir = path.resolve(rootDir || process.cwd());
+  const normalizedPaths = (paths || []).map(normalizeRel).filter(Boolean);
 
   let files = sinceRef ? changedFilesSince(dir, sinceRef) : null;
   if (!files) files = allTracked(dir);
-  files = files.filter((f) => !isIgnored(f));
+  files = files.filter((f) => !isIgnored(f)).filter((f) => matchesPaths(f, normalizedPaths));
 
   const candidates = [];
   for (const file of files) {

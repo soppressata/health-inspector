@@ -37,6 +37,7 @@ export async function runInspection(options = {}) {
     oversizedLines: options.oversizedFunctionLines,
     rules: options.rules,
     excludeRules: options.excludeRules,
+    paths: options.scanPaths,
   });
 
   const safeCandidates = options.redact === false
@@ -55,7 +56,7 @@ export async function runInspection(options = {}) {
   };
 
   if (safeCandidates.length === 0 || options.dryRun || options.offline) return result;
-  if (!options.apiKey) throw new Error('An API key is required unless --offline or --dry-run is used');
+  if (!options.apiKey && options.provider !== 'opencode') throw new Error('An API key is required unless --offline or --dry-run is used');
 
   const inspected = await inspectCandidates({
     candidates: safeCandidates,

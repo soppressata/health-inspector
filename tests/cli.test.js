@@ -89,6 +89,11 @@ test('parseArgs: --format rejects unknown formats', () => {
   assert.throws(() => parseArgs(['--format', 'xml']), /--format/);
 });
 
+test('parseArgs: --format accepts markdown-table', () => {
+  const options = parseArgs(['--format', 'markdown-table']);
+  assert.equal(options.format, 'markdown-table');
+});
+
 test('parseArgs: --oversized-lines rejects non-integers', () => {
   assert.throws(() => parseArgs(['--oversized-lines', 'abc']), /oversized-lines/);
   assert.throws(() => parseArgs(['--oversized-lines', '0']), /oversized-lines/);
@@ -251,6 +256,15 @@ test('runCli: --format github-annotation --offline exits 0 with no annotations o
   const code = await runCli([repo, '--offline', '--format', 'github-annotation'], io);
   assert.equal(code, 0);
   assert.equal(io.out().trim(), '');
+});
+
+test('runCli: --format markdown-table --offline emits a markdown table on a clean repo', async () => {
+  const repo = makeRepo();
+  write(path.join(repo, 'app.js'), 'console.log("clean");\n');
+  const io = makeIo();
+  const code = await runCli([repo, '--offline', '--format', 'markdown-table'], io);
+  assert.equal(code, 0);
+  assert.match(io.out(), /\| File \| Line \| Type \| Severity \| Reason \|/);
 });
 
 test('runCli: --offline works without an API key and skips the LLM', async () => {
